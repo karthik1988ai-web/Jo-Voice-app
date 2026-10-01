@@ -81,8 +81,18 @@ function setup() {
 
 Deno.test("rejects wrong key", async () => {
   const { call } = setup();
-  assertEquals((await call({ action: "ping" }, "nope")).status, 401);
+  const wrong = await call({ action: "ping" }, "nope");
+  assertEquals(wrong.status, 401);
+  assert(wrong.body.error.includes("doesn't match"));
+  assertEquals((await call({ action: "ping" }, "  secret  ")).body, { ok: true }); // spaces ignored
   assertEquals((await call({ action: "ping" })).body, { ok: true });
+});
+
+Deno.test("missing JO_BRIDGE_KEY secret is reported clearly", async () => {
+  const handler = createHandler(() => undefined, fetch);
+  const r = await handler(new Request("https://x", { method: "POST", headers: { "x-jo-key": "k" }, body: "{}" }));
+  assertEquals(r.status, 401);
+  assert((await r.json()).error.includes("JO_BRIDGE_KEY is not set"));
 });
 
 Deno.test("zoho connect, unread, read", async () => {
