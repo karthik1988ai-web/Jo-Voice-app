@@ -14,6 +14,8 @@
 //   KAVERY_SECRET_KEY    Kavery's secret key (sb_secret_...). Supabase refuses secret keys from browsers,
 //                        so Jo reads both business apps through this function instead.
 //   THIRUMAL_URL / THIRUMAL_SECRET_KEY   only if Thirumal is NOT the project this function runs in
+//   GOOGLE_CLIENT_ID     Google Cloud OAuth client (Web application) for Google Tasks + Calendar
+//   GOOGLE_CLIENT_SECRET
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase automatically.
 //
 // One table stores the Zoho refresh token (run once in the SQL editor):
@@ -35,6 +37,8 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
   let accessToken = "";
   let accessExpiry = 0;
   let accountId = "";
+  let googleToken = "";
+  let googleExpiry = 0;
   type Folder = { id: string; name: string; type: string };
   let folderCache: { at: number; list: Folder[] } = { at: 0, list: [] };
 
@@ -144,6 +148,57 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
     unread: String(m.status) === "0",
   });
 
+  // ---- Google Tasks + Calendar (Karthik signs in once; the refresh token stays here) ----
+  const GOOGLE_SCOPES = "https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/calendar.events";
+  function googleClient() {
+    const id = env("GOOGLE_CLIENT_ID"), secret = env("GOOGLE_CLIENT_SECRET");
+    if (!id || !secret) throw new Error("Google is not set up in the bridge. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Supabase (Edge Functions → Secrets).");
+    return { id: id.trim(), secret: secret.trim() };
+  }
+  async function googleTokenCall(params: Record<string, string>) {
+    const { id, secret } = googleClient();
+    const r = await http("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      body: new URLSearchParams({ client_id: id, client_secret: secret, ...params }),
+    });
+    return await r.json();
+  }
+  async function googleAccess(): Promise<string> {
+    if (googleToken && Date.now() < googleExpiry) return googleToken;
+    const refresh = await getSetting("google_refresh_token");
+    if (!refresh) throw new Error("Google is not connected yet. Use Connect Google in Jo's settings.");
+    const json = await googleTokenCall({ refresh_token: refresh, grant_type: "refresh_token" });
+    if (!json.access_token) throw new Error(`Google sign-in expired (${json.error ?? "no token"}). Connect Google again in Jo's settings.`);
+    googleToken = json.access_token;
+    googleExpiry = Date.now() + ((json.expires_in ?? 3600) - 120) * 1000;
+    return googleToken;
+  }
+  async function google(url: string, init: RequestInit = {}) {
+    const r = await http(url, {
+      ...init,
+      headers: { Authorization: `Bearer ${await googleAccess()}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
+    });
+    if (r.status === 204) return {};
+    const text = await r.text();
+    if (!r.ok) {
+      let msg = text.slice(0, 200);
+      try { msg = JSON.parse(text).error?.message ?? msg; } catch { /* not JSON */ }
+      throw new Error(`Google error ${r.status}: ${msg}`);
+    }
+    return text ? JSON.parse(text) : {};
+  }
+  const TASKS = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks";
+  const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+  // deno-lint-ignore no-explicit-any
+  const toTask = (t: any) => ({ id: t.id, title: t.title ?? "", notes: t.notes ?? "", due: t.due ?? null, done: t.status === "completed" });
+  // deno-lint-ignore no-explicit-any
+  const toEvent = (e: any) => {
+    const allDay = !e.start?.dateTime;
+    const start = allDay ? Date.parse(`${e.start?.date}T00:00:00`) : Date.parse(e.start.dateTime);
+    const end = allDay ? Date.parse(`${e.end?.date}T00:00:00`) : Date.parse(e.end?.dateTime ?? e.start.dateTime);
+    return { title: e.summary || "(no title)", start, end, allDay, location: e.location || "", ...(allDay ? { date: e.start.date } : {}) };
+  };
+
   // ---- Business apps (Kavery, Thirumal): only the jo_ read-only functions ----
   const APP_FUNCTIONS: Record<string, string> = { app_summary: "jo_daily_summary", app_lookup: "jo_lookup" };
   function appProject(app: string) {
@@ -249,6 +304,65 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
         return { result: await appCall(action, String(body.app ?? ""), { p_date: body.date || null }) };
       case "app_lookup":
         return { result: await appCall(action, String(body.app ?? ""), { p_search: String(body.search ?? ""), p_from: body.from || null, p_to: body.to || null }) };
+
+      case "google_auth_url": {
+        const q = new URLSearchParams({
+          client_id: googleClient().id, redirect_uri: String(body.redirectUri ?? ""), response_type: "code",
+          scope: GOOGLE_SCOPES, access_type: "offline", prompt: "consent", include_granted_scopes: "true",
+          state: String(body.state ?? ""),
+        });
+        return { url: `https://accounts.google.com/o/oauth2/v2/auth?${q}` };
+      }
+      case "google_connect": {
+        const json = await googleTokenCall({
+          code: String(body.code ?? ""), redirect_uri: String(body.redirectUri ?? ""), grant_type: "authorization_code",
+        });
+        if (!json.refresh_token) {
+          throw new Error(`Google said: ${json.error_description ?? json.error ?? "no refresh token"}. Try Connect Google again.`);
+        }
+        await setSetting("google_refresh_token", json.refresh_token);
+        googleToken = json.access_token ?? "";
+        googleExpiry = Date.now() + ((json.expires_in ?? 3600) - 120) * 1000;
+        return { connected: true };
+      }
+      case "google_status":
+        return { connected: !!(await getSetting("google_refresh_token")) };
+      case "gtasks_list": {
+        const q = new URLSearchParams({ maxResults: "100", showCompleted: String(!!body.includeDone), showHidden: String(!!body.includeDone) });
+        return { tasks: ((await google(`${TASKS}?${q}`)).items ?? []).map(toTask) };
+      }
+      case "gtasks_add": {
+        const task: Record<string, string> = { title: String(body.title ?? "").slice(0, 500) };
+        if (body.due) task.due = String(body.due);
+        if (body.notes) task.notes = String(body.notes).slice(0, 2000);
+        return { task: toTask(await google(TASKS, { method: "POST", body: JSON.stringify(task) })) };
+      }
+      case "gtasks_update": {
+        const id = encodeURIComponent(String(body.id ?? ""));
+        const patch = body.done ? { status: "completed" } : { status: "needsAction", completed: null };
+        return { task: toTask(await google(`${TASKS}/${id}`, { method: "PATCH", body: JSON.stringify(patch) })) };
+      }
+      case "gtasks_delete":
+        await google(`${TASKS}/${encodeURIComponent(String(body.id ?? ""))}`, { method: "DELETE" });
+        return { deleted: true };
+      case "gcal_list": {
+        const q = new URLSearchParams({
+          timeMin: new Date(Number(body.from)).toISOString(), timeMax: new Date(Number(body.to)).toISOString(),
+          singleEvents: "true", orderBy: "startTime", maxResults: "100",
+        });
+        return { events: ((await google(`${CAL}?${q}`)).items ?? []).filter((e: { status?: string }) => e.status !== "cancelled").map(toEvent) };
+      }
+      case "gcal_add": {
+        const tz = String(body.timeZone || "Asia/Kolkata");
+        const event = {
+          summary: String(body.title ?? "").slice(0, 300),
+          location: body.location ? String(body.location) : undefined,
+          start: { dateTime: new Date(Number(body.start)).toISOString(), timeZone: tz },
+          end: { dateTime: new Date(Number(body.end)).toISOString(), timeZone: tz },
+          description: "Added by Jo",
+        };
+        return { event: toEvent(await google(CAL, { method: "POST", body: JSON.stringify(event) })) };
+      }
       default:
         throw new Error(`Unknown action ${action}`);
     }

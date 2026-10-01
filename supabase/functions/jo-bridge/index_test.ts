@@ -34,6 +34,7 @@ function setup() {
     SUPABASE_URL: "https://proj.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_x",
     CALENDAR_ICS_URLS: "https://cal.example/basic.ics",
     KAVERY_URL: "https://kav.supabase.co/", KAVERY_SECRET_KEY: "sb_secret_kav",
+    GOOGLE_CLIENT_ID: "gid.apps.googleusercontent.com", GOOGLE_CLIENT_SECRET: "gsecret",
   };
   const http = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -71,6 +72,38 @@ function setup() {
     }
     if (url === "https://mail.zoho.com/api/accounts/77/folders/2/messages/1/content") return j({ data: { content: "<p>Hi</p>" } });
     if (url === "https://cal.example/basic.ics") return new Response(ICS);
+    if (url === "https://oauth2.googleapis.com/token") {
+      const f = init!.body as URLSearchParams;
+      assertEquals(f.get("client_secret"), "gsecret");
+      if (f.get("grant_type") === "authorization_code") {
+        assertEquals(f.get("redirect_uri"), "https://jo.example/");
+        return j(f.get("code") === "gcode" ? { refresh_token: "GRT", access_token: "GAT", expires_in: 3600 } : { error: "invalid_grant" });
+      }
+      return j(f.get("refresh_token") === "GRT" ? { access_token: "GAT2", expires_in: 3600 } : { error: "invalid_grant" });
+    }
+    if (url.startsWith("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks")) {
+      assert(String((init?.headers as Record<string, string>).Authorization).startsWith("Bearer GAT"));
+      if (init?.method === "POST") {
+        const t = JSON.parse(String(init.body));
+        return j({ id: "t1", title: t.title, due: t.due, notes: t.notes, status: "needsAction" });
+      }
+      if (init?.method === "PATCH") return j({ id: "t1", title: "Call supplier", status: JSON.parse(String(init.body)).status });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      return j({ items: [{ id: "t1", title: "Call supplier", due: "2026-10-01T00:00:00.000Z", status: "needsAction" }] });
+    }
+    if (url.startsWith("https://www.googleapis.com/calendar/v3/calendars/primary/events")) {
+      if (init?.method === "POST") {
+        const e = JSON.parse(String(init.body));
+        assertEquals(e.start.timeZone, "Asia/Kolkata");
+        return j({ summary: e.summary, start: e.start, end: e.end, location: e.location });
+      }
+      assert(url.includes("singleEvents=true"));
+      return j({ items: [
+        { summary: "Britannia rep", start: { dateTime: "2026-10-01T11:00:00+05:30" }, end: { dateTime: "2026-10-01T12:00:00+05:30" }, location: "Office" },
+        { summary: "Navaratri", start: { date: "2026-10-05" }, end: { date: "2026-10-06" } },
+        { summary: "Old", status: "cancelled", start: { dateTime: "2026-10-01T09:00:00+05:30" }, end: { dateTime: "2026-10-01T10:00:00+05:30" } },
+      ] });
+    }
     if (url === "https://kav.supabase.co/rest/v1/rpc/jo_daily_summary") {
       assertEquals((init!.headers as Record<string, string>).apikey, "sb_secret_kav");
       assertEquals(JSON.parse(String(init!.body)), { p_date: "2026-10-01" });
@@ -127,6 +160,32 @@ Deno.test("business apps go through the jo_ functions only", async () => {
   const bad = await call({ action: "app_summary", app: "payroll" });
   assertEquals(bad.status, 400);
   assert(bad.body.error.includes("kavery or thirumal"));
+});
+
+Deno.test("google: connect, tasks and calendar through the bridge", async () => {
+  const { call, store } = setup();
+  assertEquals((await call({ action: "google_status" })).body, { connected: false });
+  assert((await call({ action: "gtasks_list" })).body.error.includes("not connected"));
+  const auth = await call({ action: "google_auth_url", redirectUri: "https://jo.example/", state: "s1" });
+  const u = new URL(auth.body.url);
+  assertEquals(u.searchParams.get("client_id"), "gid.apps.googleusercontent.com");
+  assertEquals(u.searchParams.get("access_type"), "offline");
+  assert(u.searchParams.get("scope")!.includes("auth/tasks"));
+  assert((await call({ action: "google_connect", code: "bad", redirectUri: "https://jo.example/" })).body.error.includes("invalid_grant"));
+  assertEquals((await call({ action: "google_connect", code: "gcode", redirectUri: "https://jo.example/" })).body, { connected: true });
+  assertEquals(store.google_refresh_token, "GRT");
+  assertEquals((await call({ action: "gtasks_list" })).body.tasks[0], { id: "t1", title: "Call supplier", notes: "", due: "2026-10-01T00:00:00.000Z", done: false });
+  const added = await call({ action: "gtasks_add", title: "Call supplier", due: "2026-10-01T00:00:00.000Z", notes: "Reminder 5 PM" });
+  assertEquals(added.body.task.notes, "Reminder 5 PM");
+  assertEquals((await call({ action: "gtasks_update", id: "t1", done: true })).body.task.done, true);
+  assertEquals((await call({ action: "gtasks_delete", id: "t1" })).body, { deleted: true });
+  const ev = await call({ action: "gcal_list", from: Date.UTC(2026, 8, 30), to: Date.UTC(2026, 9, 7) });
+  assertEquals(ev.body.events.map((e: { title: string }) => e.title), ["Britannia rep", "Navaratri"]);
+  assertEquals(ev.body.events[0].start, Date.UTC(2026, 9, 1, 5, 30));
+  assertEquals(ev.body.events[1].allDay, true);
+  const start = Date.UTC(2026, 9, 2, 5, 30);
+  const made = await call({ action: "gcal_add", title: "Dentist", start, end: start + 3600000, timeZone: "Asia/Kolkata" });
+  assertEquals(made.body.event.title, "Dentist");
 });
 
 Deno.test("calendar expands recurring and all-day events", async () => {

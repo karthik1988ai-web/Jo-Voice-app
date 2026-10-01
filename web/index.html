@@ -170,6 +170,16 @@
     </section>
 
     <section>
+      <h3>Google Tasks &amp; Calendar</h3>
+      <p class="hint">Connect your Google account once: Jo saves tasks in Google Tasks and meetings in Google Calendar, and reads your calendar live. Needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in the bridge (see README).</p>
+      <label class="row"><input type="checkbox" data-setting="googleTasks"> Save tasks and events to Google</label>
+      <div class="voice-row">
+        <button class="test" id="connect-google">Connect Google</button>
+        <button class="test" data-test="google">Test Google</button>
+      </div>
+    </section>
+
+    <section>
       <h3>Kavery Delivery · Supabase</h3>
       <label class="row"><input type="checkbox" data-setting="kavery.viaBridge"> Read through the Jo bridge (recommended)</label>
       <p class="hint">The bridge reads the jo_daily_summary and jo_lookup functions with the secret key stored in Supabase; no database key is kept in this browser. Untick only for a direct connection with a publishable key.</p>

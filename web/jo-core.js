@@ -329,7 +329,53 @@
     }
     remove(id) { const list = this.all(); if (!list.some((t) => t.id === id)) return false; this.save(list.filter((t) => t.id !== id)); return true; }
   }
-  const describeTask = (t) => `- [${t.done ? "x" : " "}] ${t.kind === "event" ? "EVENT " : ""}${t.title}${t.due ? ` (${formatTime(t.due)})` : ""}${t.location ? ` at ${t.location}` : ""}  id=${t.id}`;
+  /**
+   * Google Tasks + Google Calendar through the Jo bridge (it keeps the Google sign-in).
+   * Google Tasks only stores a due *date*, so a reminder time is kept in the task notes
+   * as "Jo reminder: YYYY-MM-DD HH:mm" and Jo pops it up at that time.
+   */
+  class GoogleWorkspace {
+    constructor(bridge) { this.bridge = bridge; }
+
+    static fromGoogle(t) {
+      const m = /Jo reminder: (\d{4}-\d{2}-\d{2} \d{1,2}:\d{2})/.exec(t.notes || "");
+      const date = t.due ? t.due.slice(0, 10) : null;
+      const remindAt = m ? parseLocal(m[1]) : null;
+      return { id: t.id, title: t.title, done: !!t.done, source: "google", kind: "task", date,
+        due: remindAt ?? (date ? parseLocal(date) : null), remindAt };
+    }
+
+    async tasks(includeDone = false) {
+      const { tasks = [] } = await this.bridge.call("gtasks_list", { includeDone });
+      return tasks.map(GoogleWorkspace.fromGoogle)
+        .sort((a, b) => (a.done - b.done) || ((a.due ?? Infinity) - (b.due ?? Infinity)));
+    }
+
+    async addTask(title, dueMs = null) {
+      const args = { title: title.trim() };
+      if (dueMs) {
+        const d = new Date(dueMs);
+        args.due = `${isoDate(d)}T00:00:00.000Z`;
+        args.notes = `Jo reminder: ${isoDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      }
+      return GoogleWorkspace.fromGoogle((await this.bridge.call("gtasks_add", args)).task);
+    }
+
+    async setDone(id, done = true) { return GoogleWorkspace.fromGoogle((await this.bridge.call("gtasks_update", { id, done })).task); }
+    async remove(id) { await this.bridge.call("gtasks_delete", { id }); return true; }
+    async events(from, to) { return (await this.bridge.call("gcal_list", { from, to })).events || []; }
+
+    async addEvent(title, start, end, location) {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
+      return (await this.bridge.call("gcal_add", { title, start, end, location: location || "", timeZone })).event;
+    }
+  }
+
+  const describeTask = (t) => {
+    const when = t.remindAt || (t.due && t.source !== "google") ? ` (${formatTime(t.due)})`
+      : t.date ? ` (due ${new Date(t.due).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })})` : "";
+    return `- [${t.done ? "x" : " "}] ${t.kind === "event" ? "EVENT " : ""}${t.title}${when}${t.location ? ` at ${t.location}` : ""}  id=${t.id}`;
+  };
 
   // ---------- tools ----------
   const fn = (name, description, params = {}, required = []) => {
@@ -364,20 +410,21 @@
       filters: ["string", "PostgREST filters joined by &, e.g. status=eq.pending&created_at=gte.2026-10-01"],
       order: ["string", "e.g. created_at.desc"], limit: ["integer", "Max rows, default 20, max 50"],
     }, ["app", "table"]),
-    fn("list_tasks", "List Karthik's to-do tasks and Jo agenda items.", { include_done: ["boolean", "Also list completed tasks"] }),
+    fn("list_tasks", "List Karthik's to-do tasks (Google Tasks when connected).", { include_done: ["boolean", "Also list completed tasks"] }),
     fn("add_task", "Add a to-do task, optionally with a due time (Jo will remind him then).",
       { title: ["string", "What to do"], due: ["string", "Local time as YYYY-MM-DD HH:mm; omit if none"] }, ["title"]),
     fn("complete_task", "Mark a task as done.", { task_id: ["string", "id from list_tasks"] }, ["task_id"]),
     fn("delete_task", "Delete a task.", { task_id: ["string", "id from list_tasks"] }, ["task_id"]),
     fn("list_events", "Calendar events (Google Calendar plus Jo's agenda) from the start of today for the given number of days.",
       { days: ["integer", "1 = today only, 7 = this week. Default 1"] }),
-    fn("add_event", "Add a meeting or appointment to Jo's agenda (with a reminder at the start time).", {
-      title: ["string", "Event title"], start: ["string", "Local start time YYYY-MM-DD HH:mm"], location: ["string", "Optional place"],
+    fn("add_event", "Add a meeting or appointment to Karthik's calendar (Google Calendar when connected).", {
+      title: ["string", "Event title"], start: ["string", "Local start time YYYY-MM-DD HH:mm"],
+      end: ["string", "Local end time YYYY-MM-DD HH:mm; default one hour after start"], location: ["string", "Optional place"],
     }, ["title", "start"]),
   ];
 
   class Tools {
-    constructor({ bridge = null, kavery = null, thirumal = null, tasks }) { Object.assign(this, { bridge, kavery, thirumal, tasks }); }
+    constructor({ bridge = null, kavery = null, thirumal = null, tasks, google = null }) { Object.assign(this, { bridge, kavery, thirumal, tasks, google }); }
     get functions() { return FUNCTIONS; }
 
     async call(name, args = {}) {
@@ -396,16 +443,29 @@
           case "search_app_records": return await this.app(args.app).lookup(args.search, args.from, args.to);
           case "describe_app_tables": return await this.app(args.app).describe();
           case "query_app_data": return await this.app(args.app).query(args.table, args.select, args.filters, args.order, args.limit || 20);
-          case "list_tasks": return this.listTasks(!!args.include_done);
+          case "list_tasks": return await this.listTasks(!!args.include_done);
           case "add_task": {
-            const t = this.tasks.add(args.title, args.due ? parseLocal(args.due) : null);
-            return `Added: ${describeTask(t)}`;
+            const due = args.due ? parseLocal(args.due) : null;
+            if (this.google) return `Added to Google Tasks: ${describeTask(await this.google.addTask(args.title, due))}`;
+            return `Added: ${describeTask(this.tasks.add(args.title, due))}`;
           }
-          case "complete_task": { const t = this.tasks.setDone(args.task_id); return t ? `Done: ${t.title}` : "No task with that id."; }
-          case "delete_task": return this.tasks.remove(args.task_id) ? "Deleted." : "No task with that id.";
+          case "complete_task": {
+            if (this.google) return `Done in Google Tasks: ${(await this.google.setDone(args.task_id)).title}`;
+            const t = this.tasks.setDone(args.task_id); return t ? `Done: ${t.title}` : "No task with that id.";
+          }
+          case "delete_task": {
+            if (this.google) { await this.google.remove(args.task_id); return "Deleted from Google Tasks."; }
+            return this.tasks.remove(args.task_id) ? "Deleted." : "No task with that id.";
+          }
           case "list_events": return await this.listEvents(Math.min(Math.max(args.days || 1, 1), 31));
           case "add_event": {
-            const t = this.tasks.add(args.title, parseLocal(args.start), "event", args.location ? { location: args.location } : {});
+            const start = parseLocal(args.start);
+            const end = args.end ? parseLocal(args.end) : start + 3600000;
+            if (this.google) {
+              await this.google.addEvent(args.title, start, end, args.location);
+              return `Added to Google Calendar for ${formatTime(start)}.`;
+            }
+            const t = this.tasks.add(args.title, start, "event", args.location ? { location: args.location } : {});
             return `Added to Jo's agenda for ${formatTime(t.due)}.`;
           }
           default: return `Unknown function ${name}`;
@@ -422,7 +482,7 @@
         "\n## Kavery Delivery", await safe(() => (this.kavery ? this.kavery.summary() : "Not connected.")),
         "\n## Thirumal accounts", await safe(() => (this.thirumal ? this.thirumal.summary() : "Not connected.")),
         "\n## Today's calendar", await safe(() => this.listEvents(1)),
-        "\n## Open tasks", this.listTasks(false),
+        "\n## Open tasks", await safe(() => this.listTasks(false)),
       ].join("\n");
     }
 
@@ -431,8 +491,14 @@
       return mails.length ? mails.map(describeMail).join("\n") : "No unread mail.";
     }
 
-    listTasks(includeDone) {
-      const list = includeDone ? this.tasks.all() : this.tasks.open();
+    /** Google Tasks when connected, otherwise Jo's own list in this browser. */
+    async taskList(includeDone = false) {
+      if (this.google) return await this.google.tasks(includeDone);
+      return includeDone ? this.tasks.all() : this.tasks.open();
+    }
+
+    async listTasks(includeDone) {
+      const list = await this.taskList(includeDone);
       return list.length ? list.map(describeTask).join("\n") : "No tasks.";
     }
 
@@ -440,8 +506,10 @@
     async events(days) {
       const from = startOfToday(), to = from + days * 86400000;
       let calendar = [], note = "";
-      if (this.bridge) {
-        try { calendar = (await this.bridge.call("calendar", { from, to })).events; } catch (e) { note = `(Google Calendar unavailable: ${e.message})`; }
+      if (this.google) {
+        try { calendar = await this.google.events(from, to); } catch (e) { note = `(Google Calendar unavailable: ${e.message})`; }
+      } else if (this.bridge) {
+        try { calendar = (await this.bridge.call("calendar", { from, to })).events || []; } catch (e) { note = `(Google Calendar unavailable: ${e.message})`; }
       } else note = "(Google Calendar not connected)";
       const agenda = this.tasks.open().filter((t) => t.kind === "event" && t.due >= from && t.due < to)
         .map((t) => ({ title: t.title, start: t.due, end: t.due + 3600000, allDay: false, location: t.location || "", jo: true }));
@@ -538,7 +606,7 @@
     }
   }
 
-  const api = { DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  const api = { GoogleWorkspace, DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
