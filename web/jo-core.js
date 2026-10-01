@@ -55,7 +55,8 @@
     async generate(system, contents, functions = []) {
       const body = { systemInstruction: { parts: [{ text: system }] }, contents };
       if (functions.length) body.tools = [{ functionDeclarations: functions }];
-      const models = this.model === FALLBACK_MODEL ? [this.model] : [this.model, FALLBACK_MODEL];
+      // The configured model first, then the standard and lite models (skipping duplicates).
+      const models = [...new Set([this.model, DEFAULT_MODEL, FALLBACK_MODEL])];
 
       let lastError;
       for (const model of models) {
@@ -84,6 +85,10 @@
             break;
           }
           if (/api key/i.test(String(detail))) throw new Error("Gemini API key is not valid. Check it in Settings.");
+          if (res.status === 404) { // unknown model name (e.g. a typo in Settings): try the standard model
+            lastError = new Error(`Gemini model "${model}" not found. Check the model name in Settings.`);
+            break;
+          }
           const msg = {
             400: `Gemini rejected the request. Check the model name in Settings. (${detail})`,
             401: "Gemini API key is not valid. Check it in Settings.",

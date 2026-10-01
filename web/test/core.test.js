@@ -65,6 +65,17 @@ test("Gemini busy everywhere gives a clear message; 429 tries the fallback once"
   await assert.rejects(badModel.generate("s", []), /rejected the request/);
 });
 
+test("Unknown model name falls back to the standard model", async () => {
+  const urls = [];
+  const g = new Jo.Gemini("k", "gemini-flash-lite-lates", async (url) => {
+    urls.push(url);
+    return url.includes("/gemini-flash-lite-lates:") ? json({ error: { message: "not found" } }, 404)
+      : json({ candidates: [{ content: { role: "model", parts: [{ text: "ok" }] } }] });
+  });
+  assert.equal(Jo.Gemini.text(await g.generate("s", [])), "ok");
+  assert.match(urls[1], /\/gemini-flash-latest:generateContent$/);
+});
+
 test("Supabase summary, describe and query with sb_ secret key", async () => {
   const seen = [];
   const http = async (url, init = {}) => {
