@@ -227,8 +227,12 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
     const json = (data: unknown, status = 200) =>
       new Response(JSON.stringify(data), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-    const key = env("JO_BRIDGE_KEY") ?? "";
-    if (!key || req.headers.get("x-jo-key") !== key) return json({ error: "Wrong or missing Jo bridge key." }, 401);
+    // Trimmed on both sides: a stray space from copy-paste is the most common mismatch.
+    const key = (env("JO_BRIDGE_KEY") ?? "").trim();
+    if (!key) return json({ error: "JO_BRIDGE_KEY is not set in Supabase (Edge Functions → Secrets). Add it, then try again." }, 401);
+    if ((req.headers.get("x-jo-key") ?? "").trim() !== key) {
+      return json({ error: "Jo's Bridge key doesn't match JO_BRIDGE_KEY in Supabase. Re-type the same text in both places." }, 401);
+    }
 
     try {
       const body = await req.json().catch(() => ({}));
