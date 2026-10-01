@@ -26,9 +26,8 @@ body {
   font-family: var(--body);
   font-size: 16px;
   background:
-    radial-gradient(ellipse 60% 50% at 50% 42%, rgba(30, 110, 170, 0.28), transparent 70%),
-    radial-gradient(ellipse 80% 60% at 50% 120%, rgba(10, 60, 110, 0.35), transparent 70%),
-    linear-gradient(180deg, var(--bg2), var(--bg));
+    radial-gradient(ellipse 60% 50% at 50% 45%, rgba(40, 60, 120, 0.22), transparent 70%),
+    linear-gradient(180deg, #0c1222, #070b16);
   overflow: hidden;
 }
 :lang(ta), .ta { font-family: "Noto Sans Tamil", var(--body); }
@@ -37,11 +36,18 @@ a { color: var(--cyan); }
 
 /* ---------- background layers ---------- */
 #particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+/* Softly darkens the graph behind the conversation so text stays easy to read. */
+.center { position: relative; }
+.center::before {
+  content: ""; position: absolute; inset: 30% 6% 0; z-index: -1; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 55%, rgba(7, 11, 22, 0.72), transparent 70%);
+}
+.state { text-shadow: 0 0 8px var(--cyan-dim), 0 0 3px #070b16; }
 .grid-bg {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background-image:
-    linear-gradient(var(--cyan-faint) 1px, transparent 1px),
-    linear-gradient(90deg, var(--cyan-faint) 1px, transparent 1px);
+    linear-gradient(rgba(62, 230, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(62, 230, 255, 0.035) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 85%);
   -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 45%, #000 30%, transparent 85%);
