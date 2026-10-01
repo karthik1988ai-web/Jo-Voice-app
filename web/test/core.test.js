@@ -107,6 +107,12 @@ test("Supabase summary, describe and query with sb_ secret key", async () => {
   assert.equal(seen.at(-1).headers.Authorization, "Bearer eyJabc");
   assert.equal(await rpc.lookup("murugan", "2026-09-01"), '{"matching_invoices":3,"due":1200}');
   await assert.rejects(s.lookup("x"), /No lookup function set/);
+  // Spaces in the function name are turned into underscores; a public key gets a clear message.
+  const spaced = new Jo.Supabase("Kavery", { url: "https://p.supabase.co", key: "eyJabc", fn: " jo daily summary " }, http);
+  assert.equal(await spaced.summary("2026-10-01"), '{"orders":14}');
+  const denied = new Jo.Supabase("Kavery", { url: "https://p.supabase.co", key: "sb_publishable_x", fn: "jo_daily_summary" },
+    async () => json({ message: "permission denied" }, 401));
+  await assert.rejects(denied.summary(), /needs? the project's SECRET key/);
 });
 
 test("Tools: mail via bridge, events merge, missing sources", async () => {
