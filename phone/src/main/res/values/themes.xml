@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Jo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/jo_bg</item>
+        <item name="android:statusBarColor">@color/jo_bg</item>
+        <item name="android:navigationBarColor">@color/jo_bg</item>
+    </style>
+    <color name="jo_bg">#FF030A16</color>
+</resources>
