@@ -6,6 +6,9 @@
   "use strict";
 
   const DEFAULT_MODEL = "gemini-flash-latest";
+  // Used when the main model is overloaded (503) or its free quota is used up (429).
+  const FALLBACK_MODEL = "gemini-flash-lite-latest";
+  const RETRY_DELAYS = [1500, 4000];
 
   // ---------- helpers ----------
   const clip = (s, max = 4000) => (s.length <= max ? s : s.slice(0, max) + "\n…(trimmed)");
@@ -45,27 +48,57 @@
       Object.assign(this, { apiKey: apiKey.trim(), model: (model || DEFAULT_MODEL).trim(), http, base });
     }
 
-    /** Returns the model's content object; append it to history unchanged (keeps thought signatures). */
+    /**
+     * Returns the model's content object; append it to history unchanged (keeps thought signatures).
+     * Busy errors (5xx, network) are retried, then the lighter fallback model is tried.
+     */
     async generate(system, contents, functions = []) {
       const body = { systemInstruction: { parts: [{ text: system }] }, contents };
       if (functions.length) body.tools = [{ functionDeclarations: functions }];
-      const res = await this.http(`${this.base}/v1beta/models/${this.model}:generateContent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const detail = await readError(res);
-        const msg = {
-          400: `Gemini rejected the request. Check the model name in Settings. (${detail})`,
-          401: "Gemini API key is not valid. Check it in Settings.",
-          403: "Gemini API key is not valid. Check it in Settings.",
-          404: `Gemini model "${this.model}" not found. Check the model name in Settings.`,
-          429: "Gemini free-tier limit reached for now. Try again in a minute.",
-        }[res.status];
-        throw new Error(msg || `Gemini error ${res.status}. Try again shortly.`);
+      const models = this.model === FALLBACK_MODEL ? [this.model] : [this.model, FALLBACK_MODEL];
+
+      let lastError;
+      for (const model of models) {
+        for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+          if (attempt > 0) await this.sleep(RETRY_DELAYS[attempt - 1]);
+          let res;
+          try {
+            res = await this.http(`${this.base}/v1beta/models/${model}:generateContent`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
+              body: JSON.stringify(body),
+            });
+          } catch (e) {
+            lastError = new Error("Can't reach Gemini. Check your internet connection.");
+            continue; // network drop: retry
+          }
+          if (res.ok) return Gemini.parse(await res.json());
+
+          const detail = await readError(res);
+          if (res.status >= 500) { // overloaded / temporary: retry, then fall back
+            lastError = new Error("Google's Gemini servers are busy right now. Please try again in a minute.");
+            continue;
+          }
+          if (res.status === 429) { // this model's free quota is used up: try the fallback model
+            lastError = new Error("Gemini free-tier limit reached for now. Try again in a minute.");
+            break;
+          }
+          if (/api key/i.test(String(detail))) throw new Error("Gemini API key is not valid. Check it in Settings.");
+          const msg = {
+            400: `Gemini rejected the request. Check the model name in Settings. (${detail})`,
+            401: "Gemini API key is not valid. Check it in Settings.",
+            403: "Gemini API key is not valid. Check it in Settings.",
+            404: `Gemini model "${model}" not found. Check the model name in Settings.`,
+          }[res.status];
+          throw new Error(msg || `Gemini error ${res.status}: ${clip(String(detail), 200)}`);
+        }
       }
-      const json = await res.json();
+      throw lastError;
+    }
+
+    sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+    static parse(json) {
       const content = json.candidates?.[0]?.content;
       if (!json.candidates?.length) throw new Error(`Gemini gave no answer (${json.promptFeedback?.blockReason || "empty"}).`);
       return content && content.parts ? { role: "model", ...content } : { role: "model", parts: [] };
@@ -406,7 +439,7 @@
     }
   }
 
-  const api = { DEFAULT_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  const api = { DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -28,9 +28,41 @@ test("Gemini tool loop echoes thought signatures and runs add_task", async () =>
   assert.equal(new Date(t.due).getHours(), 17);
 });
 
-test("Gemini 429 gives a friendly message", async () => {
-  const g = new Jo.Gemini("k", "m", async () => json({ error: { message: "quota" } }, 429));
-  await assert.rejects(g.generate("s", [Jo.Gemini.userText("hi")]), /free-tier limit/);
+test("Gemini retries 503, then falls back to the lite model", async () => {
+  const urls = [];
+  const statuses = [503, 503, 503, 200];
+  const http = async (url) => {
+    urls.push(url);
+    const status = statuses.shift();
+    return status === 200
+      ? json({ candidates: [{ content: { role: "model", parts: [{ text: "Hello Karthik" }] } }] })
+      : json({ error: { message: "The model is overloaded." } }, status);
+  };
+  const g = new Jo.Gemini("k", "gemini-flash-latest", http);
+  const waits = [];
+  g.sleep = async (ms) => { waits.push(ms); };
+  const reply = await g.generate("s", [Jo.Gemini.userText("hi")]);
+  assert.equal(Jo.Gemini.text(reply), "Hello Karthik");
+  assert.deepEqual(waits, [1500, 4000]);
+  assert.equal(urls.filter((u) => u.includes("/gemini-flash-latest:")).length, 3);
+  assert.match(urls.at(-1), /\/gemini-flash-lite-latest:generateContent$/);
+});
+
+test("Gemini busy everywhere gives a clear message; 429 tries the fallback once", async () => {
+  const g = new Jo.Gemini("k", "m", async () => json({}, 503));
+  g.sleep = async () => {};
+  await assert.rejects(g.generate("s", []), /servers are busy/);
+
+  const urls = [];
+  const q = new Jo.Gemini("k", "gemini-flash-latest", async (url) => { urls.push(url); return json({ error: { message: "quota" } }, 429); });
+  q.sleep = async () => {};
+  await assert.rejects(q.generate("s", []), /free-tier limit/);
+  assert.equal(urls.length, 2); // main model once, fallback once, no retries
+
+  const bad = new Jo.Gemini("k", "m", async () => json({ error: { message: "API key not valid. Please pass a valid API key." } }, 400));
+  await assert.rejects(bad.generate("s", []), /API key is not valid/);
+  const badModel = new Jo.Gemini("k", "m", async () => json({ error: { message: "Invalid model" } }, 400));
+  await assert.rejects(badModel.generate("s", []), /rejected the request/);
 });
 
 test("Supabase summary, describe and query with sb_ secret key", async () => {
