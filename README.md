@@ -13,11 +13,11 @@ Every morning (8:00 AM by default) Jo writes a **morning brief** covering calend
 There are two versions:
 
 1. **PC version (web, in `web/`)**: start here. It runs in Chrome or Microsoft Edge.
-2. **Android app (in `app/`)**: built by GitHub Actions. Later the web version can also be wrapped as an APK (Capacitor), so both share one code base.
+2. **Android app (in `phone/`)**: the same Jo in an APK, built by GitHub Actions. It opens the live web version, so every update to the website reaches the phone without reinstalling. (`app/` holds the first, native Android version, which is no longer built.)
 
 Jo's brain is **Google Gemini** on the free tier. Jo is **read-only** for mail and both business databases. It only adds or completes its own tasks and agenda items.
 
-> ⚠️ This repository is **public**. Never commit API keys, Supabase keys or keystores to it. Jo stores keys only in your browser (PC) or encrypted on your phone (Android).
+> ⚠️ This repository is **public**. Never commit API keys, Supabase keys or keystores to it. Jo stores keys only in your browser (PC) or inside the Jo app on your phone.
 
 ## Cost and privacy
 
@@ -155,6 +155,7 @@ Jo listens for its name while it's idle (the ear button at the top glows while i
 |---|---|
 | `web/index.html`, `web/style.css` | The HUD layout and look |
 | `web/jo-ui.js` | Voice in/out, panels, settings, brief schedule, reminders |
+| `web/jo-android.js` | Only inside the Android app: connects the page to the phone's voice, mic and notifications |
 | `web/jo-core.js` | Jo's brain and tools: Gemini, Supabase, the bridge, tasks (no page code, so it can move into an APK later) |
 | `supabase/functions/jo-bridge/index.ts` | The bridge: Zoho Mail and Google Calendar (iCal) |
 | `web/test/`, `supabase/functions/jo-bridge/index_test.ts` | Tests, run by the "Web app" workflow on every push |
@@ -165,108 +166,41 @@ To change Jo's personality, reply length or what goes in the brief, edit `system
 
 # Android app
 
+The APK is a small Android shell around the Jo web app, so the phone has the same HUD, voices, "Jo" wake word, mail alerts, Kavery/Thirumal and Google Tasks as the PC. Because it opens the live website, **website updates reach the phone automatically**; you only reinstall the APK when the shell itself changes.
+
 ### A1. Get the APK (GitHub builds it)
 
-Every push to this repository runs **Actions → Build APK** (about 5–8 minutes).
-When it shows a green tick, open the run and download **Jo-apk** at the bottom. Unzip it to get `app-debug.apk`.
+Every push to this repository runs **Actions → Build APK** (about 5 minutes).
+When it shows a green tick, open the run and download **Jo-apk** at the bottom. Unzip it to get `Jo.apk`.
 
-Send the APK to your phone (WhatsApp to yourself or Google Drive), tap it, allow "install unknown apps", then **Install**. If Play Protect warns you, choose **Install anyway**.
+Send the APK to your phone (WhatsApp to yourself or Google Drive), tap it, allow "install unknown apps", then **Install**. If Play Protect warns you, choose **Install anyway**. If an older Jo is installed and Android refuses, uninstall the old one first.
 
-**Optional, recommended: keep settings across updates.** Android only installs a new build over the old one if both are signed with the same key. Without one, you must uninstall the old Jo first, which loses its settings. To fix this once:
+**Optional, recommended: keep settings across updates.** Android only installs a new build over the old one if both are signed with the same key. To fix this once:
 GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**, and add
 `JO_KEYSTORE_BASE64` (the base64 keystore text) and `JO_KEYSTORE_PASSWORD` (its password).
 
-### A2. Gemini key
+### A2. First start on the phone
 
-1. Open https://aistudio.google.com/apikey and sign in with Google.
-2. **Create API key** and copy it.
-3. In Jo: **Settings → Gemini API key** → paste → **Test Gemini**.
+1. Open Jo → ⚙ Settings. Fill in the same values as on the PC: **Gemini API key**, **Jo bridge URL** and **bridge key**. Tap **Save**. (Zoho, Kavery and Thirumal then work through the bridge, nothing else to enter.)
+2. **Google Tasks & Calendar:** Google doesn't allow its sign-in page inside apps. Connect Google **once on the PC**; then tap **Test Google** on the phone. The bridge keeps the login, so the phone uses the same connection.
+3. Allow **microphone** and **notifications** when Jo asks.
 
-The model defaults to `gemini-flash-latest`, Google's current fast model. You can type another model name, such as `gemini-2.5-flash`, if Google changes its free models.
+### A3. Phone tips
 
-### A3. Zoho Mail
-
-Jo uses a Zoho **Self Client**, so no web login page or server is needed:
-
-1. Open https://api-console.zoho.com (use `.in`/`.eu` instead of `.com` if your Zoho account is in that region) → **Add Client → Self Client → Create**.
-2. **Client Secret** tab: copy the **Client ID** and **Client Secret** into Jo's Settings.
-3. **Generate Code** tab:
-   - Scope: `ZohoMail.accounts.READ,ZohoMail.messages.READ,ZohoMail.folders.READ`
-   - Time duration: 10 minutes. Description: "Jo".
-   - **Create**, then copy the code.
-4. Within those 10 minutes, paste it into Jo's **Grant code** field and tap **Connect**, then **Test**.
-
-You only do this once. If Jo later says the Zoho login expired, repeat step 3 and step 4.
-
-### A4. Kavery Delivery and Thirumal (Supabase)
-
-For each app, open its project at https://supabase.com/dashboard → **Project Settings → API keys** (Data API):
-
-| Jo setting | Where to find it |
-|---|---|
-| **Project URL** | `https://<project-ref>.supabase.co` (Project Settings → Data API) |
-| **API key** | the **secret** key (`sb_secret_…`), or the legacy **service_role** key |
-| **Tables Jo may read** | e.g. `orders, deliveries, payments, riders`. Leave blank to let Jo see all tables. |
-| **Summary function** | optional, see below |
-
-Tap **Test** for each.
-
-**Why the secret key?** Your apps' public (anon/publishable) keys are limited by Row Level Security, which usually hides business data from anyone who isn't logged in, so Jo would see nothing. The secret key can read everything. Jo's code only ever **reads** (it never sends insert, update or delete), and the key is stored encrypted on your phone. Because the secret key could write if it ever leaked, keep your phone locked. If you lose the phone, **rotate the key** in Supabase (API keys → roll/delete).
-
-#### Optional: a summary function for a faster, sharper brief
-
-Without a summary function, Jo's brief shows each allowed table's row count and latest rows. For exact figures like "orders today" and "payments today", create a SQL function in each project (**SQL Editor → New query**). Adapt the table and column names to your schema. Example for Kavery:
-
-```sql
-create or replace function public.jo_daily_summary(p_date date default current_date)
-returns json
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select json_build_object(
-    'date',              p_date,
-    'new_orders',        (select count(*) from orders where created_at::date = p_date),
-    'delivered',         (select count(*) from orders where status = 'delivered' and updated_at::date = p_date),
-    'pending_orders',    (select count(*) from orders where status in ('pending', 'assigned', 'out_for_delivery')),
-    'payments_received', (select coalesce(sum(amount), 0) from payments where created_at::date = p_date)
-  );
-$$;
-
--- Only Jo's secret key may call it, never the public app key.
-revoke execute on function public.jo_daily_summary(date) from public, anon, authenticated;
-grant execute on function public.jo_daily_summary(date) to service_role;
-```
-
-For Thirumal, return things like today's sales, collections, outstanding receivables and low stock. Then type `jo_daily_summary` into Jo's **Summary function** field.
-Jo calls it with `{"p_date": "YYYY-MM-DD"}` and passes whatever JSON it returns to Gemini.
-
-### A5. Phone settings
-
-- **Allow notifications and calendar** when Jo asks on first launch.
-- **On-time morning brief:** phone Settings → Apps → Jo → Battery → **Unrestricted**. On Xiaomi, Redmi, Oppo or Vivo, also turn on **Autostart**.
-- **Tamil voice:** Settings → System → Languages → Text-to-speech → Google engine → Install voice data → **Tamil**. Then choose **தமிழ்** in Jo's Settings.
-- **Voice input** uses Google's speech recognizer (the Google app must be enabled).
-
----
+- **Say "Jo"** while Jo is on screen. Android doesn't let apps listen in the background, so the wake word pauses when you leave Jo and resumes when you come back. The mic button always works.
+- **Back** closes Settings; on the main screen it sends Jo to the background (still running, so mail alerts and reminders keep coming while the phone keeps it alive).
+- **Full screen:** the ⛶ button hides the status and navigation bars.
+- **Tamil phone voice:** Settings → System → Languages → Text-to-speech → Google engine → Install voice data → **Tamil**. Or keep the **Gemini AI voice**, which already speaks Tamil.
+- **Keep Jo alive for alerts:** phone Settings → Apps → Jo → Battery → **Unrestricted**. On Xiaomi, Redmi, Oppo or Vivo, also turn on **Autostart**.
+- **Voice input** uses the phone's Google speech recognizer (the Google app must be enabled).
 
 ### How the Android app works
 
 | File | What it does |
 |---|---|
-| `core/JoAgent.kt` | Jo's brain: the Gemini conversation, the system prompt, the morning-brief prompt |
-| `core/JoTools.kt` | Functions Gemini can call: mail, app summaries and queries, tasks, calendar |
-| `core/GeminiClient.kt` | Gemini REST API (`generateContent` with function calling) |
-| `core/ZohoMailClient.kt` | Zoho Mail (read-only) with Self Client OAuth |
-| `core/SupabaseSource.kt` | Read-only Supabase REST: table queries and the optional summary function |
-| `core/TaskStore.kt` | Jo's task list (JSON file on the phone) |
-| `android/CalendarRepo.kt` | Phone calendar read and add |
-| `android/BriefWorker.kt` | Daily morning brief in the background, plus notification |
-| `android/ReminderWorker.kt` | Task reminder notifications |
-| `android/Prefs.kt` | Encrypted settings |
-| `ui/` | Screens: Jo (voice/chat), Today (tasks + calendar), Settings |
+| `phone/.../MainActivity.kt` | Shows the live Jo site in a WebView; other links open in the browser; Back, full screen, permissions |
+| `phone/.../NativeBridge.kt` | The phone's speech recognizer, text-to-speech and notifications, offered to the page |
+| `phone/.../JoUrls.kt` | Which pages may open inside Jo (only Jo's own site can use the microphone and voice) |
+| `web/jo-android.js` | The page side: gives Jo's web code `SpeechRecognition`, `speechSynthesis`, `Notification` and full screen backed by the phone. Does nothing in a normal browser. |
 
-To change Jo's personality, reply length, or what goes into the brief, edit `systemPrompt()` and `morningBrief()` in `core/JoAgent.kt`.
-
-Unit tests for the core (Gemini tool loop, Zoho, Supabase, tasks) run on every build: `./gradlew testDebugUnitTest`.
+Unit tests run on every build: `./gradlew :phone:testDebugUnitTest`.

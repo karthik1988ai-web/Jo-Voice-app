@@ -31,9 +31,11 @@ jobs:
       - name: Build
         env:
           JO_KEYSTORE_PASSWORD: ${{ secrets.JO_KEYSTORE_PASSWORD }}
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+        run: |
+          ./gradlew --no-daemon :phone:testDebugUnitTest :phone:assembleDebug
+          cp phone/build/outputs/apk/debug/phone-debug.apk Jo.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: Jo-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: Jo.apk

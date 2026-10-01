@@ -118,6 +118,8 @@
   // ---------- speech out ----------
   // Gemini AI voices (natural, need internet and count against the free daily limit) or the
   // PC's own voices (instant, offline). Short alerts always use the PC voice to save quota.
+  const inApp = !!window.JoApp; // running inside the Android app (see jo-android.js)
+  const DEVICE = inApp ? "phone" : "PC";
   let voices = [];
   const loadVoices = () => { voices = speechSynthesis.getVoices(); if (!$("settings").hidden) fillVoiceSelects(); };
   if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
@@ -151,7 +153,9 @@
     const u = new SpeechSynthesisUtterance(text);
     u.voice = pcVoice(lang, name) || null;
     u.lang = u.voice?.lang || (lang === "ta" ? "ta-IN" : "en-IN");
-    if (lang === "ta" && !u.voice) toast("No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
+    if (lang === "ta" && !u.voice) toast(inApp
+      ? "No Tamil phone voice found. Install it: phone Settings → Text-to-speech → Google → Install voice data → Tamil. Or choose the Gemini AI voice."
+      : "No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
     u.rate = 1.02;
     u.onstart = () => { if (seq === speakSeq) setState("speaking"); };
     u.onend = u.onerror = () => { if (seq === speakSeq) setState("idle"); };
@@ -197,7 +201,7 @@
         return;
       } catch (e) {
         if (seq !== speakSeq) return;
-        if (!warnedGeminiVoice || opts.voice) toast(`${e.message} Using the PC voice instead.`);
+        if (!warnedGeminiVoice || opts.voice) toast(`${e.message} Using the ${DEVICE} voice instead.`);
         warnedGeminiVoice = true;
       }
     }
@@ -223,14 +227,16 @@
         const re = lang === "ta" ? /^ta/i : /^en/i;
         const list = voices.filter((v) => re.test(v.lang));
         sel.innerHTML = '<option value="">Automatic</option>' + list.map((v) => `<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.lang)})</option>`).join("")
-          + (list.length ? "" : `<option value="" disabled>No ${lang === "ta" ? "Tamil" : "English"} voice on this PC</option>`);
+          + (list.length ? "" : `<option value="" disabled>No ${lang === "ta" ? "Tamil" : "English"} voice on this ${DEVICE}</option>`);
       }
       sel.value = current || (engine === "gemini" ? (lang === "ta" ? "Kore" : "Charon") : "");
       sel.dataset.engine = engine;
     });
     $("voice-hint").textContent = engine === "gemini"
-      ? "Gemini voices sound natural and speak both English and Tamil. They need internet and use Gemini's free daily voice limit; if it runs out, Jo uses the PC voice."
-      : "PC voices are instant and work offline. For Tamil, Microsoft Edge includes good voices (Pallavi, Valluvar).";
+      ? `Gemini voices sound natural and speak both English and Tamil. They need internet and use Gemini's free daily voice limit; if it runs out, Jo uses the ${DEVICE} voice.`
+      : inApp
+        ? "Phone voices are instant and work offline. For Tamil, install it once: phone Settings → Text-to-speech → Google → Install voice data → Tamil."
+        : "PC voices are instant and work offline. For Tamil, Microsoft Edge includes good voices (Pallavi, Valluvar).";
   }
 
   // ---------- speech in ----------
@@ -731,6 +737,12 @@
   // ---------- Google sign-in (the bridge keeps the login) ----------
   const redirectUri = () => location.origin + location.pathname;
   async function connectGoogle() {
+    if (inApp) {
+      // Google doesn't allow its sign-in page inside apps. The bridge keeps one Google login for
+      // every device, so connecting once on the PC is enough.
+      $("test-out").textContent = "Google sign-in doesn't open inside the app. Click Connect Google once on your PC; then tap Test Google here and the phone uses the same connection.";
+      return;
+    }
     collectSettings();
     const bridge = buildTools().bridge;
     if (!bridge) { $("test-out").textContent = "✖ Fill in the Jo bridge URL and key first."; return; }
@@ -769,6 +781,7 @@
   });
 
   // ---------- start ----------
+  if (inApp) $("voice-engine").querySelector('option[value="browser"]').textContent = "Phone voice (instant, offline)";
   setLang(settings.tamil); renderMute(); renderWake(); renderFullscreen(); renderSystems(); renderTasks(); tickClock(); setState("idle");
   addMsg("jo", settings.geminiKey
     ? (settings.tamil ? "வணக்கம் கார்த்திக். நான் தயார்." : "Good to see you, Karthik. All systems ready. What do you need?")
@@ -781,5 +794,14 @@
   setInterval(renderTasks, 5 * 60000); // picks up tasks added in Google Tasks elsewhere
   checkReminders(); checkBrief();
   checkMail(); scheduleMail();
-  finishGoogleSignIn();
+  finishGoogleSignIn().then(syncGoogleStatus);
+  // Google may have been connected from another device (the bridge keeps the login): pick it up.
+  async function syncGoogleStatus() {
+    const bridge = buildTools().bridge;
+    if (!bridge || settings.googleConnected) return;
+    try {
+      const { connected } = await bridge.call("google_status");
+      if (connected) { settings.googleConnected = true; saveSettings(); agent = null; renderTasks(); renderAgenda(); }
+    } catch { /* older bridge or offline: leave it */ }
+  }
 })();

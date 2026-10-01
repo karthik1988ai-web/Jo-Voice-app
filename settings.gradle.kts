@@ -14,4 +14,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Jo"
-include(":app")
+include(":app")   // the first, native Android version (no longer built by CI)
+include(":phone") // Jo for Android: the web app in a native shell
