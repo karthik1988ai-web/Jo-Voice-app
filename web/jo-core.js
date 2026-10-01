@@ -123,6 +123,7 @@
       this.rest = cfg.url.trim().replace(/\/+$/, "") + "/rest/v1";
       this.key = cfg.key.trim();
       this.fn = (cfg.fn || "").trim();
+      this.lookupFn = (cfg.lookupFn || "").trim();
       this.allowed = (cfg.tables || "").split(",").map((t) => t.trim()).filter(Boolean);
       this.http = http;
     }
@@ -149,7 +150,7 @@
           method: "POST", headers: this.headers({ "Content-Type": "application/json" }), body: JSON.stringify({ p_date: day }),
         });
         if (!res.ok) throw new Error(`${this.name} summary function: HTTP ${res.status} ${clip(await readError(res), 200)}`);
-        return clip(await res.text(), 6000);
+        return clip(await res.text(), 20000);
       }
       const tables = (await this.tables()).slice(0, 8);
       if (!tables.length) return `No tables configured for ${this.name}. Add table names in Settings.`;
@@ -161,6 +162,17 @@
         } catch (e) { parts.push(`Table ${t}: unavailable (${e.message.slice(0, 120)})`); }
       }
       return parts.join("\n\n");
+    }
+
+    /** Search records (clients, salesmen, products, invoice numbers) through the lookup function. */
+    async lookup(search, from, to) {
+      if (!this.lookupFn) throw new Error(`No lookup function set for ${this.name}. Add it in Settings (e.g. jo_lookup).`);
+      const res = await this.http(`${this.rest}/rpc/${this.lookupFn}`, {
+        method: "POST", headers: this.headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ p_search: search || "", p_from: from || null, p_to: to || null }),
+      });
+      if (!res.ok) throw new Error(`${this.name} lookup function: HTTP ${res.status} ${clip(await readError(res), 200)}`);
+      return clip(await res.text(), 20000);
     }
 
     async describe() {
@@ -264,6 +276,10 @@
       { folder_id: ["string", "folderId from the list"], message_id: ["string", "messageId from the list"] }, ["folder_id", "message_id"]),
     fn("get_app_summary", "Daily summary from one of Karthik's apps: kavery (Kavery Delivery: orders, deliveries, payments) or thirumal (Thirumal accounts: sales, collections, outstanding, stock).",
       { app: ["string", "kavery or thirumal"], date: ["string", "YYYY-MM-DD; omit for today"] }, ["app"]),
+    fn("search_app_records", "Search kavery or thirumal records by client/shop name, salesman, beat/area, product or invoice number, optionally within dates. Returns matching invoices, totals, received and due amounts. Use for specific customers, salesmen, products or older periods.", {
+      app: ["string", "kavery or thirumal"], search: ["string", "Name, salesman, beat, product or invoice number; empty for all"],
+      from: ["string", "Start date YYYY-MM-DD (optional)"], to: ["string", "End date YYYY-MM-DD (optional)"],
+    }, ["app"]),
     fn("describe_app_tables", "List the database tables and their columns for kavery or thirumal. Call this before query_app_data if you don't know the columns.",
       { app: ["string", "kavery or thirumal"] }, ["app"]),
     fn("query_app_data", "Read rows from a kavery or thirumal database table (read-only, Supabase/PostgREST).", {
@@ -301,6 +317,7 @@
             return clip(stripHtml(content), 5000);
           }
           case "get_app_summary": return await this.app(args.app).summary(args.date || null);
+          case "search_app_records": return await this.app(args.app).lookup(args.search, args.from, args.to);
           case "describe_app_tables": return await this.app(args.app).describe();
           case "query_app_data": return await this.app(args.app).query(args.table, args.select, args.filters, args.order, args.limit || 20);
           case "list_tasks": return this.listTasks(!!args.include_done);
@@ -390,7 +407,8 @@
         'Say money in rupees and dates naturally ("tomorrow at 5 PM").',
         "",
         "Use the functions to look things up rather than guessing. For Kavery or Thirumal questions, start with get_app_summary;",
-        "for specific details call describe_app_tables, then query_app_data.",
+        "for a specific customer, salesman, product or an older period use search_app_records; describe_app_tables and",
+        "query_app_data are for apps with plain tables.",
         "When he asks you to remember, remind, or do something later, add a task (with a due time if he gave one).",
         "When he mentions a meeting or appointment, add an event. Briefly confirm what you added.",
         "",
