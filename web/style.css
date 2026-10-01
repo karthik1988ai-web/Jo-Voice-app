@@ -79,6 +79,11 @@ a { color: var(--cyan); }
   background: transparent; border: 1px solid var(--line); border-radius: 50%; color: var(--cyan);
 }
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+.icon-btn.wake { color: var(--muted, #6b8aa3); opacity: 0.7; }
+.icon-btn.wake.on { color: var(--cyan); opacity: 1; }
+.icon-btn.wake.live { box-shadow: 0 0 0 2px var(--cyan-dim), 0 0 12px var(--cyan-dim); animation: wake-breathe 2.4s ease-in-out infinite; }
+@keyframes wake-breathe { 50% { box-shadow: 0 0 0 4px transparent, 0 0 18px var(--cyan-dim); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn.wake.live { animation: none; } }
 .icon-btn:hover, .seg:hover { box-shadow: 0 0 10px var(--cyan-dim); }
 
 /* ---------- layout ---------- */
