@@ -1,7 +1,7 @@
 /* Jo UI: wires the HUD to JoCore (voice, panels, settings, brief and reminders). */
 (function () {
   "use strict";
-  const { Gemini, Supabase, Bridge, BridgeApp, TaskStore, Tools, Agent, DEFAULT_MODEL, formatTime, isoDate, startOfToday } = window.JoCore;
+  const { Gemini, Supabase, Bridge, BridgeApp, TaskStore, Tools, Agent, DEFAULT_MODEL, DEFAULT_TTS_MODEL, GEMINI_VOICES, formatTime, isoDate, startOfToday } = window.JoCore;
   const formatAgo = (ms) => {
     const min = Math.round((Date.now() - ms) / 60000);
     if (min < 1) return "just now";
@@ -24,7 +24,9 @@
     geminiKey: "", geminiModel: DEFAULT_MODEL, bridgeUrl: "", bridgeKey: "",
     kavery: { viaBridge: true, url: "", key: "", tables: "", fn: "", lookupFn: "" },
     thirumal: { viaBridge: true, url: "", key: "", tables: "", fn: "", lookupFn: "" },
-    tamil: false, speak: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
+    tamil: false, speak: true,
+    voiceEngine: "gemini", geminiVoiceEn: "Charon", geminiVoiceTa: "Kore", pcVoiceEn: "", pcVoiceTa: "", ttsModel: "",
+    briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
   settings.kavery = { ...DEFAULTS.kavery, ...settings.kavery };
@@ -109,22 +111,121 @@
   }
 
   // ---------- speech out ----------
+  // Gemini AI voices (natural, need internet and count against the free daily limit) or the
+  // PC's own voices (instant, offline). Short alerts always use the PC voice to save quota.
   let voices = [];
-  const loadVoices = () => { voices = speechSynthesis.getVoices(); };
+  const loadVoices = () => { voices = speechSynthesis.getVoices(); if (!$("settings").hidden) fillVoiceSelects(); };
   if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
-  function speak(text) {
-    if (!settings.speak || !("speechSynthesis" in window)) { setState("idle"); return; }
-    speechSynthesis.cancel();
+  let audioCtx = null, currentSource = null, speakSeq = 0, warnedGeminiVoice = false;
+  function ensureAudio() {
+    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx?.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+  // Browsers only allow sound after a click or key press; prepare audio on the first one.
+  ["pointerdown", "keydown"].forEach((ev) => addEventListener(ev, ensureAudio, { once: true }));
+
+  function stopSpeaking() {
+    speakSeq++;
+    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    if (currentSource) { try { currentSource.stop(); } catch { /* already stopped */ } currentSource = null; }
+  }
+  const isSpeaking = () => !!currentSource || ("speechSynthesis" in window && speechSynthesis.speaking);
+
+  function pcVoice(lang, name) {
+    const re = lang === "ta" ? /^ta/i : /^en/i;
+    const chosen = name && voices.find((v) => v.name === name);
+    if (chosen) return chosen;
+    const pick = (r) => voices.find((v) => r.test(v.lang) && /natural|online|google/i.test(v.name)) || voices.find((v) => r.test(v.lang));
+    return lang === "ta" ? pick(re) : pick(/^en-IN/i) || pick(/^en-GB/i) || pick(re);
+  }
+
+  function speakWithPc(text, lang, name, seq) {
+    if (!("speechSynthesis" in window)) { setState("idle"); return; }
     const u = new SpeechSynthesisUtterance(text);
-    const pick = (re) => voices.find((v) => re.test(v.lang) && /natural|online|google/i.test(v.name)) || voices.find((v) => re.test(v.lang));
-    u.voice = settings.tamil ? pick(/^ta/i) : pick(/^en-IN/i) || pick(/^en-GB/i) || pick(/^en/i);
-    u.lang = u.voice?.lang || (settings.tamil ? "ta-IN" : "en-IN");
-    if (settings.tamil && !u.voice) toast("No Tamil voice found. Microsoft Edge has one built in (Pallavi / Valluvar).");
+    u.voice = pcVoice(lang, name) || null;
+    u.lang = u.voice?.lang || (lang === "ta" ? "ta-IN" : "en-IN");
+    if (lang === "ta" && !u.voice) toast("No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
     u.rate = 1.02;
-    u.onstart = () => setState("speaking");
-    u.onend = u.onerror = () => setState("idle");
+    u.onstart = () => { if (seq === speakSeq) setState("speaking"); };
+    u.onend = u.onerror = () => { if (seq === speakSeq) setState("idle"); };
     speechSynthesis.speak(u);
+  }
+
+  function playPcm({ data, rate }, seq) {
+    const ctx = ensureAudio();
+    if (!ctx) throw new Error("This browser can't play audio.");
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    const view = new DataView(bytes.buffer);
+    const samples = new Float32Array(Math.floor(bytes.length / 2));
+    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+    const buffer = ctx.createBuffer(1, samples.length, rate);
+    buffer.copyToChannel(samples, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(ctx.destination);
+    src.onended = () => { if (currentSource === src) { currentSource = null; if (seq === speakSeq) setState("idle"); } };
+    currentSource = src;
+    setState("speaking");
+    src.start();
+  }
+
+  /**
+   * Speaks [text]. opts: lang ("en"/"ta", default from the language switch), engine, voice,
+   * quick (short alert: always the PC voice), force (speak even when replies are muted).
+   */
+  async function speak(text, opts = {}) {
+    if (!opts.force && !settings.speak) { setState("idle"); return; }
+    stopSpeaking();
+    const seq = speakSeq;
+    const lang = opts.lang || (settings.tamil ? "ta" : "en");
+    const engine = opts.quick ? "browser" : opts.engine || settings.voiceEngine;
+    if (engine === "gemini" && settings.geminiKey) {
+      const voice = opts.voice || (lang === "ta" ? settings.geminiVoiceTa : settings.geminiVoiceEn) || "Charon";
+      try {
+        setState("thinking", "PREPARING VOICE");
+        const style = lang === "ta" ? "" : "Say in a calm, clear, friendly voice with a light Indian English accent:";
+        const audio = await new Gemini(settings.geminiKey, settings.geminiModel).speech(text, voice, settings.ttsModel || DEFAULT_TTS_MODEL, style);
+        if (seq !== speakSeq) return; // something newer started meanwhile
+        playPcm(audio, seq);
+        return;
+      } catch (e) {
+        if (seq !== speakSeq) return;
+        if (!warnedGeminiVoice || opts.voice) toast(`${e.message} Using the PC voice instead.`);
+        warnedGeminiVoice = true;
+      }
+    }
+    const pcName = opts.engine === "browser" && opts.voice ? opts.voice : lang === "ta" ? settings.pcVoiceTa : settings.pcVoiceEn;
+    speakWithPc(text, lang, pcName, seq);
+  }
+
+  const SAMPLE = {
+    en: "Good morning Karthik. Kavery had fourteen orders today, and three payments are pending.",
+    ta: "வணக்கம் கார்த்திக். இன்று காவேரியில் பதினான்கு ஆர்டர்கள் வந்துள்ளன. மூன்று பணம் நிலுவையில் உள்ளது.",
+  };
+
+  // Voice pickers in Settings: Gemini voices or this PC's voices for each language.
+  function fillVoiceSelects() {
+    const engine = $("voice-engine").value;
+    ["en", "ta"].forEach((lang) => {
+      const sel = $(`voice-${lang}`);
+      const key = engine === "gemini" ? (lang === "ta" ? "geminiVoiceTa" : "geminiVoiceEn") : (lang === "ta" ? "pcVoiceTa" : "pcVoiceEn");
+      const current = sel.dataset.engine === engine && sel.value ? sel.value : settings[key];
+      if (engine === "gemini") {
+        sel.innerHTML = GEMINI_VOICES.map(([n, d]) => `<option value="${n}">${n} · ${esc(d)}</option>`).join("");
+      } else {
+        const re = lang === "ta" ? /^ta/i : /^en/i;
+        const list = voices.filter((v) => re.test(v.lang));
+        sel.innerHTML = '<option value="">Automatic</option>' + list.map((v) => `<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.lang)})</option>`).join("")
+          + (list.length ? "" : `<option value="" disabled>No ${lang === "ta" ? "Tamil" : "English"} voice on this PC</option>`);
+      }
+      sel.value = current || (engine === "gemini" ? (lang === "ta" ? "Kore" : "Charon") : "");
+      sel.dataset.engine = engine;
+    });
+    $("voice-hint").textContent = engine === "gemini"
+      ? "Gemini voices sound natural and speak both English and Tamil. They need internet and use Gemini's free daily voice limit; if it runs out, Jo uses the PC voice."
+      : "PC voices are instant and work offline. For Tamil, Microsoft Edge includes good voices (Pallavi, Valluvar).";
   }
 
   // ---------- speech in ----------
@@ -133,7 +234,7 @@
   function listen() {
     if (rec) { rec.stop(); return; }
     if (!Recognition) { toast("Voice input needs Chrome or Edge. You can still type."); return; }
-    if ("speechSynthesis" in window) speechSynthesis.cancel();
+    stopSpeaking();
     rec = new Recognition();
     rec.lang = settings.tamil ? "ta-IN" : "en-IN";
     rec.interimResults = true;
@@ -200,7 +301,7 @@
     } finally { busy = false; }
   }
   const markBriefPlayed = () => { const b = readJson("jo.brief", null); if (b) { b.played = true; storage.setItem("jo.brief", JSON.stringify(b)); } $("brief-banner").hidden = true; };
-  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) speak(b.text); markBriefPlayed(); }
+  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) speak(b.text, { force: true }); markBriefPlayed(); }
 
   // ---------- panels ----------
   function renderSystems() {
@@ -274,7 +375,7 @@
       notify("Jo reminder", t.title);
       toast(text);
       addMsg("jo", text);
-      if (navigator.userActivation?.hasBeenActive && !busy) speak(text);
+      if (navigator.userActivation?.hasBeenActive && !busy) speak(text, { quick: true });
     }
     storage.setItem("jo.fired", JSON.stringify([...fired].slice(-200)));
     renderTasks();
@@ -335,8 +436,7 @@
       ? `New email from ${latest.from}${latest.folder ? `, in ${latest.folder}` : ""}: ${latest.subject}`
       : `You have ${fresh.length} new emails. The latest is from ${latest.from}: ${latest.subject}`;
     toast(line);
-    const speaking = "speechSynthesis" in window && speechSynthesis.speaking;
-    if (settings.announceMail && navigator.userActivation?.hasBeenActive && !busy && !speaking && !rec) speak(line);
+    if (settings.announceMail && navigator.userActivation?.hasBeenActive && !busy && !isSpeaking() && !rec) speak(line, { quick: true });
   }
 
   function scheduleMail() {
@@ -353,6 +453,7 @@
       const v = field(el.dataset.setting);
       if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? "";
     });
+    fillVoiceSelects();
     $("settings").hidden = false; $("drawer-backdrop").hidden = false;
   }
   function closeSettings() { $("settings").hidden = true; $("drawer-backdrop").hidden = true; }
@@ -361,6 +462,9 @@
     document.querySelectorAll("[data-setting]").forEach((el) => setField(el.dataset.setting,
       el.type === "checkbox" ? el.checked : el.type === "number" ? Math.max(0, Number(el.value) || 0) : el.value.trim()));
     if (!settings.geminiModel) settings.geminiModel = DEFAULT_MODEL;
+    const engine = $("voice-engine").value;
+    if (engine === "gemini") { settings.geminiVoiceEn = $("voice-en").value; settings.geminiVoiceTa = $("voice-ta").value; }
+    else { settings.pcVoiceEn = $("voice-en").value; settings.pcVoiceTa = $("voice-ta").value; }
     ["kavery", "thirumal"].forEach((k) => {
       if (/^sb_secret_/.test(settings[k].key)) { settings[k].key = ""; removedSecret = true; }
     });
@@ -434,7 +538,7 @@
   document.addEventListener("keydown", (e) => {
     const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
     if (e.code === "Space" && !typing && $("settings").hidden) { e.preventDefault(); listen(); }
-    if (e.key === "Escape") { if (!$("settings").hidden) closeSettings(); else if ("speechSynthesis" in window) { speechSynthesis.cancel(); setState("idle"); } }
+    if (e.key === "Escape") { if (!$("settings").hidden) closeSettings(); else { stopSpeaking(); setState("idle"); } }
   });
   $("quick").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
@@ -444,7 +548,7 @@
   $("dismiss-brief").addEventListener("click", markBriefPlayed);
   $("lang-en").addEventListener("click", () => setLang(false));
   $("lang-ta").addEventListener("click", () => setLang(true));
-  $("mute").addEventListener("click", () => { settings.speak = !settings.speak; saveSettings(); renderMute(); if (!settings.speak) speechSynthesis.cancel(); });
+  $("mute").addEventListener("click", () => { settings.speak = !settings.speak; saveSettings(); renderMute(); if (!settings.speak) { stopSpeaking(); setState("idle"); } });
   $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", closeSettings);
   $("drawer-backdrop").addEventListener("click", closeSettings);
@@ -458,6 +562,11 @@
   });
   document.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", () => runTest(b.dataset.test)));
   $("refresh-agenda").addEventListener("click", renderAgenda);
+  $("voice-engine").addEventListener("change", fillVoiceSelects);
+  document.querySelectorAll("[data-preview]").forEach((b) => b.addEventListener("click", () => {
+    const lang = b.dataset.preview;
+    speak(SAMPLE[lang], { lang, engine: $("voice-engine").value, voice: $(`voice-${lang}`).value, force: true });
+  }));
   $("refresh-mail").addEventListener("click", checkMail);
   $("mail").addEventListener("click", (e) => {
     const li = e.target.closest("li[data-from]"); if (!li) return;
