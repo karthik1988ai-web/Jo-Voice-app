@@ -172,7 +172,7 @@
         body: JSON.stringify({ p_search: search || "", p_from: from || null, p_to: to || null }),
       });
       if (!res.ok) throw new Error(`${this.name} lookup function: HTTP ${res.status} ${clip(await readError(res), 200)}`);
-      return clip(await res.text(), 20000);
+      return clip(await res.text(), 40000); // broad searches (all orders in a month) can be ~30k characters
     }
 
     async describe() {
