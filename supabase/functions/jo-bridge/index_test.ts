@@ -1,0 +1,96 @@
+// Run: JO_BRIDGE_TEST=1 deno test --allow-env --allow-net=registry.npmjs.org supabase/functions/jo-bridge/
+import { assertEquals, assert } from "jsr:@std/assert@1";
+import { createHandler } from "./index.ts";
+
+const ICS = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:a
+DTSTART:20261001T053000Z
+DTEND:20261001T063000Z
+SUMMARY:Britannia rep meeting
+LOCATION:Office
+END:VEVENT
+BEGIN:VEVENT
+UID:b
+DTSTART:20260901T123000Z
+DTEND:20260901T133000Z
+RRULE:FREQ=WEEKLY;BYDAY=FR
+SUMMARY:Weekly review
+END:VEVENT
+BEGIN:VEVENT
+UID:c
+DTSTART;VALUE=DATE:20261005
+DTEND;VALUE=DATE:20261006
+SUMMARY:Navaratri
+END:VEVENT
+END:VCALENDAR`;
+
+function setup() {
+  const store: Record<string, string> = {};
+  const calls: string[] = [];
+  const env: Record<string, string> = {
+    JO_BRIDGE_KEY: "secret", ZOHO_CLIENT_ID: "cid", ZOHO_CLIENT_SECRET: "cs",
+    SUPABASE_URL: "https://proj.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_x",
+    CALENDAR_ICS_URLS: "https://cal.example/basic.ics",
+  };
+  const http = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    calls.push(`${init?.method ?? "GET"} ${url}`);
+    const j = (d: unknown, s = 200) => new Response(JSON.stringify(d), { status: s });
+    if (url.startsWith("https://proj.supabase.co/rest/v1/jo_bridge_settings")) {
+      if (init?.method === "POST") { const b = JSON.parse(String(init.body)); store[b.key] = b.value; return j([]); }
+      const k = decodeURIComponent(url.split("key=eq.")[1].split("&")[0]);
+      return j(store[k] ? [{ value: store[k] }] : []);
+    }
+    if (url === "https://accounts.zoho.com/oauth/v2/token") {
+      const f = init!.body as URLSearchParams;
+      if (f.get("grant_type") === "authorization_code") return j(f.get("code") === "good" ? { refresh_token: "RT" } : { error: "invalid_code" });
+      return j(f.get("refresh_token") === "RT" ? { access_token: "AT", expires_in: 3600 } : { error: "invalid" });
+    }
+    if (url === "https://mail.zoho.com/api/accounts") return j({ data: [{ accountId: 77 }] });
+    if (url.startsWith("https://mail.zoho.com/api/accounts/77/messages/view")) {
+      assert(url.includes("status=unread"));
+      return j({ data: [{ messageId: 1, folderId: 2, sender: "Bank", subject: "GST", summary: "Due", receivedTime: "1759300000000", status: "0" }] });
+    }
+    if (url === "https://mail.zoho.com/api/accounts/77/folders/2/messages/1/content") return j({ data: { content: "<p>Hi</p>" } });
+    if (url === "https://cal.example/basic.ics") return new Response(ICS);
+    return j({}, 404);
+  }) as typeof fetch;
+  const handler = createHandler((n) => env[n], http);
+  const call = (body: unknown, key = "secret") =>
+    handler(new Request("https://x/functions/v1/jo-bridge", { method: "POST", headers: { "x-jo-key": key }, body: JSON.stringify(body) }))
+      .then(async (r) => ({ status: r.status, body: await r.json() }));
+  return { call, store, calls };
+}
+
+Deno.test("rejects wrong key", async () => {
+  const { call } = setup();
+  assertEquals((await call({ action: "ping" }, "nope")).status, 401);
+  assertEquals((await call({ action: "ping" })).body, { ok: true });
+});
+
+Deno.test("zoho connect, unread, read", async () => {
+  const { call, store } = setup();
+  const notConnected = await call({ action: "zoho_unread" });
+  assertEquals(notConnected.status, 400);
+  assert(notConnected.body.error.includes("not connected"));
+  assert((await call({ action: "zoho_connect", code: "bad" })).body.error.includes("invalid_code"));
+  assertEquals((await call({ action: "zoho_connect", code: "good" })).body, { connected: true });
+  assertEquals(store.zoho_refresh_token, "RT");
+  const unread = await call({ action: "zoho_unread", limit: 5 });
+  assertEquals(unread.body.mails[0], { messageId: "1", folderId: "2", from: "Bank", subject: "GST", summary: "Due", received: 1759300000000, unread: true });
+  assertEquals((await call({ action: "zoho_read", folderId: "2", messageId: "1" })).body.content, "<p>Hi</p>");
+});
+
+Deno.test("calendar expands recurring and all-day events", async () => {
+  const { call } = setup();
+  const from = Date.UTC(2026, 8, 30, 18, 30); // 1 Oct 00:00 IST
+  const to = from + 7 * 86400000;
+  const { body } = await call({ action: "calendar", from, to });
+  const titles = body.events.map((e: { title: string }) => e.title);
+  assertEquals(titles, ["Britannia rep meeting", "Weekly review", "Navaratri"]);
+  assertEquals(body.events[1].start, Date.UTC(2026, 9, 2, 12, 30)); // Friday 2 Oct
+  assertEquals(body.events[2].allDay, true);
+  assertEquals(body.events[2].date, "2026-10-05");
+});

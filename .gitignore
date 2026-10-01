@@ -5,3 +5,5 @@ build/
 *.iml
 .DS_Store
 captures/
+*.keystore
+*.jks

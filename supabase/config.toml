@@ -1,0 +1,4 @@
+# Only needed when deploying with the Supabase CLI (`supabase functions deploy jo-bridge`).
+# Jo authenticates with its own x-jo-key header, so Supabase's JWT check is turned off.
+[functions.jo-bridge]
+verify_jwt = false

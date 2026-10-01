@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jo Assistant</title>
+<meta name="description" content="Jo: Karthik's personal voice assistant for Zoho Mail, Kavery Delivery, Thirumal accounts, tasks and calendar.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23030A16' stroke='%233EE6FF' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='12' fill='%233EE6FF'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&family=Noto+Sans+Tamil:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="particles" aria-hidden="true"></canvas>
+<div class="grid-bg" aria-hidden="true"></div>
+<div class="scanline" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">J.O.</span>
+    <span class="brand-sub">PERSONAL ASSISTANT · <span id="online">ONLINE</span></span>
+  </div>
+  <div class="top-actions">
+    <div class="lang" role="group" aria-label="Language">
+      <button id="lang-en" class="seg">EN</button><button id="lang-ta" class="seg">தமிழ்</button>
+    </div>
+    <button id="mute" class="icon-btn" title="Speak replies aloud" aria-label="Toggle speech"></button>
+    <button id="open-settings" class="icon-btn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.7a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.7a7 7 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="hud">
+  <!-- Left: systems -->
+  <aside class="panel" id="systems-panel">
+    <h2 class="panel-title"><span>Systems</span></h2>
+    <ul class="systems" id="systems"></ul>
+
+    <h2 class="panel-title"><span>Quick commands</span></h2>
+    <div class="quick" id="quick">
+      <button data-brief>Morning brief</button>
+      <button data-ask="Any important unread mail?">Unread mail</button>
+      <button data-ask="How is Kavery Delivery doing today? Orders, deliveries and payments.">Kavery today</button>
+      <button data-ask="What are today's Thirumal sales and collections?">Thirumal sales</button>
+      <button data-ask="What's on my calendar today?">Today's agenda</button>
+      <button data-ask="What tasks are still open?">Open tasks</button>
+    </div>
+  </aside>
+
+  <!-- Center: reactor + conversation -->
+  <section class="center">
+    <button id="reactor" class="reactor idle" aria-label="Talk to Jo (Space)">
+      <svg viewBox="0 0 400 400" aria-hidden="true">
+        <defs>
+          <radialGradient id="coreGlow">
+            <stop offset="0%" stop-color="#E9FDFF"/>
+            <stop offset="35%" stop-color="#7DF1FF"/>
+            <stop offset="70%" stop-color="rgba(62,230,255,.35)"/>
+            <stop offset="100%" stop-color="rgba(62,230,255,0)"/>
+          </radialGradient>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g class="ring r1"><circle cx="200" cy="200" r="190" pathLength="360" stroke-dasharray="1 5"/></g>
+        <g class="ring r2"><circle cx="200" cy="200" r="172" pathLength="360" stroke-dasharray="70 20 30 20"/></g>
+        <g class="ring r3"><circle cx="200" cy="200" r="154"/></g>
+        <g class="ring r4" filter="url(#glow)"><circle cx="200" cy="200" r="136" pathLength="360" stroke-dasharray="40 14 8 14"/></g>
+        <g id="bars" class="bars"></g>
+        <circle class="core-halo" cx="200" cy="200" r="96" fill="url(#coreGlow)"/>
+        <circle class="core-ring" cx="200" cy="200" r="62" filter="url(#glow)"/>
+        <text class="core-text" x="200" y="214" text-anchor="middle">JO</text>
+      </svg>
+    </button>
+    <div class="state" id="state">STANDING BY</div>
+
+    <div class="brief-banner" id="brief-banner" hidden>
+      <span>Morning brief ready</span>
+      <button id="play-brief">▶ Play</button>
+      <button id="dismiss-brief" aria-label="Dismiss">✕</button>
+    </div>
+
+    <div class="transcript" id="transcript" aria-live="polite"></div>
+
+    <form class="ask" id="ask-form" autocomplete="off">
+      <input id="ask-input" placeholder="Ask Jo anything…" aria-label="Ask Jo">
+      <button type="submit" class="send" aria-label="Send">
+        <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>
+      </button>
+      <button type="button" id="mic" class="mic" aria-label="Speak">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+      </button>
+    </form>
+  </section>
+
+  <!-- Right: today -->
+  <aside class="panel" id="today-panel">
+    <div class="clock">
+      <div id="clock-time">--:--</div>
+      <div id="clock-date">—</div>
+    </div>
+
+    <h2 class="panel-title"><span>Agenda</span><button class="mini" id="refresh-agenda" title="Refresh">↻</button></h2>
+    <ul class="agenda" id="agenda"><li class="muted">Loading…</li></ul>
+
+    <h2 class="panel-title"><span>Tasks</span></h2>
+    <form class="add-task" id="add-task">
+      <input id="task-title" placeholder="New task" aria-label="New task">
+      <input id="task-due" type="datetime-local" aria-label="Reminder time">
+      <button type="submit" aria-label="Add task">+</button>
+    </form>
+    <ul class="tasks" id="tasks"></ul>
+  </aside>
+</main>
+
+<!-- Settings drawer -->
+<div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+<aside class="drawer" id="settings" hidden aria-label="Settings">
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button class="icon-btn" id="close-settings" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body">
+    <section>
+      <h3>Gemini · Jo's brain</h3>
+      <p class="hint">Free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</p>
+      <label>API key<input type="password" data-setting="geminiKey"></label>
+      <label>Model<input data-setting="geminiModel" placeholder="gemini-flash-latest"></label>
+      <button class="test" data-test="gemini">Test Gemini</button>
+    </section>
+
+    <section>
+      <h3>Jo bridge · Zoho Mail &amp; Google Calendar</h3>
+      <p class="hint">The Supabase Edge Function from the README. URL looks like https://xxxx.supabase.co/functions/v1/jo-bridge</p>
+      <label>Bridge URL<input data-setting="bridgeUrl"></label>
+      <label>Bridge key (JO_BRIDGE_KEY)<input type="password" data-setting="bridgeKey"></label>
+      <button class="test" data-test="bridge">Test mail &amp; calendar</button>
+      <label>Zoho grant code (Self Client › Generate code)<input id="zoho-code"></label>
+      <p class="hint">Scopes: ZohoMail.accounts.READ,ZohoMail.messages.READ,ZohoMail.folders.READ</p>
+      <button class="test" data-test="zoho-connect">Connect Zoho Mail</button>
+    </section>
+
+    <section>
+      <h3>Kavery Delivery · Supabase</h3>
+      <label>Project URL<input data-setting="kavery.url" placeholder="https://xxxx.supabase.co"></label>
+      <label>API key (secret)<input type="password" data-setting="kavery.key"></label>
+      <label>Tables Jo may read<input data-setting="kavery.tables" placeholder="orders, deliveries, payments"></label>
+      <label>Summary function (optional)<input data-setting="kavery.fn" placeholder="jo_daily_summary"></label>
+      <button class="test" data-test="kavery">Test Kavery</button>
+    </section>
+
+    <section>
+      <h3>Thirumal accounts · Supabase</h3>
+      <label>Project URL<input data-setting="thirumal.url" placeholder="https://xxxx.supabase.co"></label>
+      <label>API key (secret)<input type="password" data-setting="thirumal.key"></label>
+      <label>Tables Jo may read<input data-setting="thirumal.tables" placeholder="sales, receipts, customers"></label>
+      <label>Summary function (optional)<input data-setting="thirumal.fn" placeholder="jo_daily_summary"></label>
+      <button class="test" data-test="thirumal">Test Thirumal</button>
+    </section>
+
+    <section>
+      <h3>Morning brief</h3>
+      <label class="row"><input type="checkbox" data-setting="briefEnabled"> Make a brief every morning</label>
+      <label>Time<input type="time" data-setting="briefTime"></label>
+      <p class="hint">Jo makes the brief when the page is open at that time, or the first time you open it after.</p>
+    </section>
+
+    <div class="drawer-foot">
+      <button id="save-settings" class="primary">Save</button>
+      <pre class="test-out" id="test-out" aria-live="polite"></pre>
+    </div>
+  </div>
+</aside>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="jo-core.js"></script>
+<script src="jo-ui.js"></script>
+</body>
+</html>
