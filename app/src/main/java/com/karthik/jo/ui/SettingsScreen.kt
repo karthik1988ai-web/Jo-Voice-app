@@ -81,7 +81,7 @@ fun SettingsScreen(vm: JoViewModel, modifier: Modifier) {
         prefs.zohoClientSecret = zohoSecret
         kavery.save(prefs.kavery)
         thirumal.save(prefs.thirumal)
-        if (briefEnabled) BriefScheduler.schedule(context, prefs) else BriefScheduler.cancel(context)
+        if (briefEnabled) BriefScheduler.schedule(context, prefs, reschedule = true) else BriefScheduler.cancel(context)
         vm.settingsChanged()
     }
 

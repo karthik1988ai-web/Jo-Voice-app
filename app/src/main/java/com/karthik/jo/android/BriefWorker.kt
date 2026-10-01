@@ -10,9 +10,9 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.karthik.jo.JoApp
@@ -28,9 +28,6 @@ class BriefWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
 
     override suspend fun doWork(): Result {
         val prefs = Prefs(applicationContext)
-        // Queue tomorrow's run first so one failure never stops the daily brief.
-        if (prefs.briefEnabled) BriefScheduler.schedule(applicationContext, prefs)
-
         val agent = Jo.agent(applicationContext, prefs) ?: run {
             notify("Jo needs setup", "Add your Gemini API key in Settings to get the morning brief.")
             return Result.success()
@@ -77,8 +74,12 @@ class BriefWorker(context: Context, params: WorkerParameters) : CoroutineWorker(
 object BriefScheduler {
     private const val WORK_NAME = "morning-brief"
 
-    /** Schedules the next brief at the configured time (today if still ahead, else tomorrow). */
-    fun schedule(context: Context, prefs: Prefs) {
+    /**
+     * Runs the brief every 24 hours, starting at the configured time.
+     * [reschedule] = false (app start) keeps an existing schedule, so a brief that is
+     * about to run is never cancelled; true (settings saved) applies a new time.
+     */
+    fun schedule(context: Context, prefs: Prefs, reschedule: Boolean = false) {
         val next = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, prefs.briefHour)
             set(Calendar.MINUTE, prefs.briefMinute)
@@ -86,11 +87,15 @@ object BriefScheduler {
             set(Calendar.MILLISECOND, 0)
             if (timeInMillis <= System.currentTimeMillis() + 60_000) add(Calendar.DAY_OF_YEAR, 1)
         }
-        val request = OneTimeWorkRequestBuilder<BriefWorker>()
+        val request = PeriodicWorkRequestBuilder<BriefWorker>(24, TimeUnit.HOURS)
             .setInitialDelay(next.timeInMillis - System.currentTimeMillis(), TimeUnit.MILLISECONDS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request)
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WORK_NAME,
+            if (reschedule) ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE else ExistingPeriodicWorkPolicy.KEEP,
+            request,
+        )
     }
 
     fun cancel(context: Context) = WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
