@@ -141,6 +141,22 @@
     </section>
 
     <section>
+      <h3>Jo's voice</h3>
+      <label>Voice engine
+        <select id="voice-engine" data-setting="voiceEngine">
+          <option value="gemini">Gemini AI voice (natural)</option>
+          <option value="browser">PC voice (instant, offline)</option>
+        </select>
+      </label>
+      <div class="voice-row"><label>English voice<select id="voice-en"></select></label><button class="test" data-preview="en">▶ Preview</button></div>
+      <div class="voice-row"><label>Tamil voice<select id="voice-ta"></select></label><button class="test" data-preview="ta">▶ Preview</button></div>
+      <p class="hint" id="voice-hint"></p>
+      <details class="direct"><summary>Gemini voice model (advanced)</summary>
+        <label>Model<input data-setting="ttsModel" placeholder="gemini-2.5-flash-preview-tts" spellcheck="false"></label>
+      </details>
+    </section>
+
+    <section>
       <h3>Jo bridge · Zoho Mail &amp; Google Calendar</h3>
       <p class="hint">The Supabase Edge Function from the README. URL looks like https://xxxx.supabase.co/functions/v1/jo-bridge</p>
       <label>Bridge URL<input data-setting="bridgeUrl"></label>

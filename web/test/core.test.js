@@ -28,6 +28,24 @@ test("Gemini tool loop echoes thought signatures and runs add_task", async () =>
   assert.equal(new Date(t.due).getHours(), 17);
 });
 
+test("Gemini speech asks for audio with the chosen voice and reads the sample rate", async () => {
+  let sent;
+  const http = async (url, init) => {
+    sent = { url, body: JSON.parse(init.body) };
+    return json({ candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/L16;codec=pcm;rate=24000", data: "AAEC" } }] } }] });
+  };
+  const g = new Jo.Gemini("k", "gemini-flash-latest", http);
+  const audio = await g.speech("வணக்கம்", "Kore");
+  assert.deepEqual(audio, { data: "AAEC", rate: 24000 });
+  assert.match(sent.url, /\/gemini-2\.5-flash-preview-tts:generateContent$/);
+  assert.deepEqual(sent.body.generationConfig.responseModalities, ["AUDIO"]);
+  assert.equal(sent.body.generationConfig.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, "Kore");
+  assert.equal(sent.body.contents[0].parts[0].text, "வணக்கம்");
+  const limited = new Jo.Gemini("k", "m", async () => json({}, 429));
+  await assert.rejects(limited.speech("hi", "Puck"), /daily limit/);
+  assert.ok(Jo.GEMINI_VOICES.length >= 30);
+});
+
 test("Gemini retries 503, then falls back to the lite model", async () => {
   const urls = [];
   const statuses = [503, 503, 503, 200];

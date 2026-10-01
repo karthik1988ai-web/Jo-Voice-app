@@ -99,6 +99,15 @@ If you update the `jo-bridge` code later, paste the new version into the same fu
 
 Notes: Google's iCal feed can lag behind the calendar by up to a few hours. Events you add by voice go into **Jo's agenda** (marked **JO**), not into Google Calendar.
 
+## Jo's voice
+
+⚙ Settings → **Jo's voice**:
+
+- **Gemini AI voice (natural):** Google's AI voices (Charon, Kore, Puck, Sulafat and 26 more). The same voice speaks English and Tamil, and you can pick a different one for each language. **▶ Preview** plays a sample. These voices use Gemini's free daily voice limit; when it runs out, Jo automatically uses the PC voice until it resets.
+- **PC voice (instant, offline):** the voices installed in Windows or your browser. For Tamil, Microsoft Edge includes Pallavi and Valluvar.
+
+Short alerts (new-mail and reminder announcements) always use the PC voice, so they don't use up the Gemini voice limit.
+
 ## 5. Morning brief and reminders
 
 - Jo makes the brief at the set time if it's open, or the first time you open it after that time. A notification lets you play it.

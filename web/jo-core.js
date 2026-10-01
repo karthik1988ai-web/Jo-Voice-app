@@ -9,6 +9,18 @@
   // Used when the main model is overloaded (503) or its free quota is used up (429).
   const FALLBACK_MODEL = "gemini-flash-lite-latest";
   const RETRY_DELAYS = [1500, 4000];
+  // Gemini text-to-speech: natural voices that speak both English and Tamil.
+  const DEFAULT_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+  const GEMINI_VOICES = [
+    ["Charon", "Informative, male"], ["Kore", "Firm, female"], ["Puck", "Upbeat, male"], ["Zephyr", "Bright, female"],
+    ["Fenrir", "Excitable, male"], ["Leda", "Youthful, female"], ["Orus", "Firm, male"], ["Aoede", "Breezy, female"],
+    ["Callirrhoe", "Easy-going, female"], ["Autonoe", "Bright, female"], ["Enceladus", "Breathy, male"], ["Iapetus", "Clear, male"],
+    ["Umbriel", "Easy-going, male"], ["Algieba", "Smooth, male"], ["Despina", "Smooth, female"], ["Erinome", "Clear, female"],
+    ["Algenib", "Gravelly, male"], ["Rasalgethi", "Informative, male"], ["Laomedeia", "Upbeat, female"], ["Achernar", "Soft, female"],
+    ["Alnilam", "Firm, male"], ["Schedar", "Even, male"], ["Gacrux", "Mature, female"], ["Pulcherrima", "Forward, female"],
+    ["Achird", "Friendly, male"], ["Zubenelgenubi", "Casual, male"], ["Vindemiatrix", "Gentle, female"], ["Sadachbia", "Lively, male"],
+    ["Sadaltager", "Knowledgeable, male"], ["Sulafat", "Warm, female"],
+  ];
 
   // ---------- helpers ----------
   const clip = (s, max = 4000) => (s.length <= max ? s : s.slice(0, max) + "\n…(trimmed)");
@@ -102,6 +114,35 @@
     }
 
     sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+    /**
+     * Turns text into speech with a Gemini voice. Returns { data: base64 16-bit PCM, rate }.
+     * [style] is an optional spoken-style instruction (it is not read aloud).
+     */
+    async speech(text, voice, model = DEFAULT_TTS_MODEL, style = "") {
+      const res = await this.http(`${this.base}/v1beta/models/${(model || DEFAULT_TTS_MODEL).trim()}:generateContent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: style ? `${style}\n${text}` : text }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Charon" } } },
+          },
+        }),
+      });
+      if (!res.ok) {
+        const detail = await readError(res);
+        if (res.status === 429) throw new Error("Gemini voice daily limit reached.");
+        if (res.status === 404) throw new Error(`Gemini voice model "${model}" not found.`);
+        throw new Error(`Gemini voice error ${res.status}: ${clip(String(detail), 150)}`);
+      }
+      const json = await res.json();
+      const part = (json.candidates?.[0]?.content?.parts || []).find((p) => p.inlineData?.data);
+      if (!part) throw new Error("Gemini returned no audio.");
+      const rate = Number((/rate=(\d+)/.exec(part.inlineData.mimeType || "") || [])[1]) || 24000;
+      return { data: part.inlineData.data, rate };
+    }
 
     static parse(json) {
       const content = json.candidates?.[0]?.content;
@@ -497,7 +538,7 @@
     }
   }
 
-  const api = { BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  const api = { DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
