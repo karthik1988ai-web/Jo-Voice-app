@@ -116,14 +116,25 @@
     static calls(content) { return (content.parts || []).filter((p) => p.functionCall).map((p) => p.functionCall); }
   }
 
+  /** Explains common Supabase function errors in plain words. */
+  async function rpcError(name, kind, fn, res) {
+    if (res.status === 401 || res.status === 403) {
+      return new Error(`${name} ${kind} function "${fn}" refused the API key. These Jo functions need the project's SECRET key (sb_secret_… or service_role), not the public/anon key.`);
+    }
+    if (res.status === 404) return new Error(`${name} ${kind} function "${fn}" was not found. Check the spelling in Settings (e.g. jo_daily_summary).`);
+    return new Error(`${name} ${kind} function: HTTP ${res.status} ${clip(String(await readError(res)), 200)}`);
+  }
+
   // ---------- Supabase (Kavery, Thirumal): read-only REST ----------
   class Supabase {
     constructor(name, cfg, http = defaultHttp) {
       this.name = name;
       this.rest = cfg.url.trim().replace(/\/+$/, "") + "/rest/v1";
       this.key = cfg.key.trim();
-      this.fn = (cfg.fn || "").trim();
-      this.lookupFn = (cfg.lookupFn || "").trim();
+      // Function names can't contain spaces; "jo daily summary" means jo_daily_summary.
+      const fnName = (v) => String(v || "").trim().replace(/[\s-]+/g, "_");
+      this.fn = fnName(cfg.fn);
+      this.lookupFn = fnName(cfg.lookupFn);
       this.allowed = (cfg.tables || "").split(",").map((t) => t.trim()).filter(Boolean);
       this.http = http;
     }
@@ -149,7 +160,7 @@
         const res = await this.http(`${this.rest}/rpc/${this.fn}`, {
           method: "POST", headers: this.headers({ "Content-Type": "application/json" }), body: JSON.stringify({ p_date: day }),
         });
-        if (!res.ok) throw new Error(`${this.name} summary function: HTTP ${res.status} ${clip(await readError(res), 200)}`);
+        if (!res.ok) throw await rpcError(this.name, "summary", this.fn, res);
         return clip(await res.text(), 20000);
       }
       const tables = (await this.tables()).slice(0, 8);
@@ -171,7 +182,7 @@
         method: "POST", headers: this.headers({ "Content-Type": "application/json" }),
         body: JSON.stringify({ p_search: search || "", p_from: from || null, p_to: to || null }),
       });
-      if (!res.ok) throw new Error(`${this.name} lookup function: HTTP ${res.status} ${clip(await readError(res), 200)}`);
+      if (!res.ok) throw await rpcError(this.name, "lookup", this.lookupFn, res);
       return clip(await res.text(), 40000); // broad searches (all orders in a month) can be ~30k characters
     }
 
