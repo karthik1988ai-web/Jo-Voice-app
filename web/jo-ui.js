@@ -654,7 +654,11 @@
 
   reactor.addEventListener("click", listen);
   $("mic").addEventListener("click", listen);
-  $("ask-form").addEventListener("submit", (e) => { e.preventDefault(); const v = $("ask-input").value; $("ask-input").value = ""; ask(v); });
+  $("ask-form").addEventListener("submit", (e) => {
+    e.preventDefault(); const v = $("ask-input").value; $("ask-input").value = "";
+    $("ask-input").blur(); // so Space (talk) and F (full screen) work again after asking
+    ask(v);
+  });
   document.addEventListener("keydown", (e) => {
     const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
     if (e.code === "Space" && !typing && $("settings").hidden) { e.preventDefault(); listen(); }
