@@ -31,6 +31,8 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
   let accessToken = "";
   let accessExpiry = 0;
   let accountId = "";
+  type Folder = { id: string; name: string; type: string };
+  let folderCache: { at: number; list: Folder[] } = { at: 0, list: [] };
 
   // ---- settings table (service role) ----
   const restBase = () => `${env("SUPABASE_URL")}/rest/v1/jo_bridge_settings`;
@@ -90,6 +92,41 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
     const data = (await zohoGet("/accounts")).data ?? [];
     if (!data.length) throw new Error("No Zoho Mail account found");
     return (accountId = String(data[0].accountId));
+  }
+
+  // Folders that hold incoming mail: everything except Sent, Drafts, Templates, Outbox and Trash.
+  const SKIP_FOLDERS = /^(sent|drafts|templates|outbox|trash)$/i;
+  async function incomingFolders(): Promise<Folder[]> {
+    if (Date.now() - folderCache.at < 10 * 60_000 && folderCache.list.length) return folderCache.list;
+    const data = (await zohoGet(`/accounts/${await account()}/folders`)).data ?? [];
+    // deno-lint-ignore no-explicit-any
+    const list: Folder[] = data.map((f: any) => ({ id: String(f.folderId), name: String(f.folderName ?? ""), type: String(f.folderType ?? "") }))
+      .filter((f: Folder) => !SKIP_FOLDERS.test(f.type) && !SKIP_FOLDERS.test(f.name));
+    folderCache = { at: Date.now(), list };
+    return list;
+  }
+
+  /** Unread mail across every incoming folder, newest first. */
+  async function unreadAllFolders(limit: number) {
+    const folders = await incomingFolders();
+    const perFolder = Math.min(Math.max(limit, 5), 30);
+    const results: ReturnType<typeof toMail>[] = [];
+    // A few folders at a time keeps us well inside Zoho's rate limits.
+    for (let i = 0; i < folders.length; i += 4) {
+      const batch = folders.slice(i, i + 4);
+      const lists = await Promise.all(batch.map(async (f) => {
+        const q = new URLSearchParams({ folderId: f.id, status: "unread", limit: String(perFolder), sortorder: "false" });
+        try {
+          return ((await zohoGet(`/accounts/${await account()}/messages/view?${q}`)).data ?? [])
+            // deno-lint-ignore no-explicit-any
+            .map((m: any) => ({ ...toMail(m), folder: f.name }));
+        } catch {
+          return []; // one unreadable folder shouldn't hide the rest
+        }
+      }));
+      lists.forEach((l) => results.push(...l));
+    }
+    return results.sort((a, b) => b.received - a.received).slice(0, limit);
   }
 
   // deno-lint-ignore no-explicit-any
@@ -159,9 +196,9 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
         return { connected: true };
       }
       case "zoho_unread":
+        return { mails: await unreadAllFolders(Math.min(Number(body.limit) || 15, 50)) };
       case "zoho_recent": {
         const q = new URLSearchParams({ limit: String(Math.min(Number(body.limit) || 10, 30)), sortorder: "false" });
-        if (action === "zoho_unread") q.set("status", "unread");
         return { mails: ((await zohoGet(`/accounts/${await account()}/messages/view?${q}`)).data ?? []).map(toMail) };
       }
       case "zoho_search": {

@@ -49,9 +49,24 @@ function setup() {
       return j(f.get("refresh_token") === "RT" ? { access_token: "AT", expires_in: 3600 } : { error: "invalid" });
     }
     if (url === "https://mail.zoho.com/api/accounts") return j({ data: [{ accountId: 77 }] });
+    if (url === "https://mail.zoho.com/api/accounts/77/folders") {
+      return j({ data: [
+        { folderId: 2, folderName: "Inbox", folderType: "Inbox" },
+        { folderId: 3, folderName: "Reports", folderType: "" },
+        { folderId: 4, folderName: "Sent", folderType: "Sent" },
+        { folderId: 5, folderName: "Trash", folderType: "Trash" },
+      ] });
+    }
     if (url.startsWith("https://mail.zoho.com/api/accounts/77/messages/view")) {
-      assert(url.includes("status=unread"));
-      return j({ data: [{ messageId: 1, folderId: 2, sender: "Bank", subject: "GST", summary: "Due", receivedTime: "1759300000000", status: "0" }] });
+      const u = new URL(url);
+      if (u.searchParams.get("folderId") === "2") {
+        assertEquals(u.searchParams.get("status"), "unread");
+        return j({ data: [{ messageId: 1, folderId: 2, sender: "Bank", subject: "GST", summary: "Due", receivedTime: "1759300000000", status: "0" }] });
+      }
+      if (u.searchParams.get("folderId") === "3") {
+        return j({ data: [{ messageId: 9, folderId: 3, sender: "Britannia", subject: "MTD sales", summary: "4.2L", receivedTime: "1759400000000", status: "0" }] });
+      }
+      throw new Error(`folder ${u.searchParams.get("folderId")} should be skipped`);
     }
     if (url === "https://mail.zoho.com/api/accounts/77/folders/2/messages/1/content") return j({ data: { content: "<p>Hi</p>" } });
     if (url === "https://cal.example/basic.ics") return new Response(ICS);
@@ -79,7 +94,9 @@ Deno.test("zoho connect, unread, read", async () => {
   assertEquals((await call({ action: "zoho_connect", code: "good" })).body, { connected: true });
   assertEquals(store.zoho_refresh_token, "RT");
   const unread = await call({ action: "zoho_unread", limit: 5 });
-  assertEquals(unread.body.mails[0], { messageId: "1", folderId: "2", from: "Bank", subject: "GST", summary: "Due", received: 1759300000000, unread: true });
+  // All incoming folders (Inbox + Reports), newest first; Sent and Trash skipped.
+  assertEquals(unread.body.mails.map((m: { subject: string; folder: string }) => `${m.folder}:${m.subject}`), ["Reports:MTD sales", "Inbox:GST"]);
+  assertEquals(unread.body.mails[1], { messageId: "1", folderId: "2", from: "Bank", subject: "GST", summary: "Due", received: 1759300000000, unread: true, folder: "Inbox" });
   assertEquals((await call({ action: "zoho_read", folderId: "2", messageId: "1" })).body.content, "<p>Hi</p>");
 });
 

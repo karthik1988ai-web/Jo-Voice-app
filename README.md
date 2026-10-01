@@ -83,6 +83,10 @@ alter table public.jo_bridge_settings enable row level security;  -- no policies
 **f) Connect Jo:** in Jo's settings fill in **Bridge URL** (`https://<project-ref>.supabase.co/functions/v1/jo-bridge`) and **Bridge key** (your `JO_BRIDGE_KEY`), then click **Test mail & calendar**.
 Then in Zoho's Self Client go to **Generate Code**, with scope `ZohoMail.accounts.READ,ZohoMail.messages.READ,ZohoMail.folders.READ`, duration 10 minutes, and click **Create**. Paste the code into Jo's **Zoho grant code** field and click **Connect Zoho Mail**. You only do this once.
 
+**New-mail watch:** while Jo is open, it checks **all incoming Zoho folders** (Inbox and your own folders; Sent, Drafts, Templates, Outbox and Trash are skipped). By default it checks every 3 minutes; change the interval in Settings, where 0 turns it off. New emails appear in the **Mail** panel with their folder name, pop up as desktop notifications, and are announced aloud. "Announce new emails aloud" in Settings turns the spoken part off. Click an email in the panel and Jo reads it to you. The first check after opening Jo only learns what's already unread, so old mail isn't announced.
+
+If you update the `jo-bridge` code later, paste the new version into the same function in Supabase and click **Deploy** again.
+
 Notes: Google's iCal feed can lag behind the calendar by up to a few hours. Events you add by voice go into **Jo's agenda** (marked **JO**), not into Google Calendar.
 
 ## 5. Morning brief and reminders
