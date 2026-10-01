@@ -263,7 +263,7 @@
       input.value = (finalText + interim).trim();
     };
     rec.onerror = (e) => {
-      if (e.error === "not-allowed") toast("Microphone blocked. Allow it in the address bar to talk to Jo.");
+      if (e.error === "not-allowed") toast(inApp ? "Microphone blocked. Phone Settings → Apps → Jo → Permissions → Microphone → Allow." : "Microphone blocked. Allow it in the address bar to talk to Jo.");
       else if (e.error !== "no-speech" && e.error !== "aborted") toast(`Voice error: ${e.error}`);
     };
     rec.onend = () => {
@@ -305,7 +305,9 @@
     r.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         settings.wakeWord = false; saveSettings(); renderWake();
-        toast('Microphone blocked, so "Jo" can\'t hear you. Allow the mic in the address bar, then turn the ear back on.');
+        toast(inApp
+          ? 'Microphone blocked, so "Jo" can\'t hear you. Phone Settings → Apps → Jo → Permissions → Microphone → Allow, then tap the ear button.'
+          : 'Microphone blocked, so "Jo" can\'t hear you. Allow the mic in the address bar, then turn the ear back on.');
       } else if (e.error !== "no-speech" && e.error !== "aborted") wakeFails++;
     };
     r.onend = () => {
@@ -677,8 +679,10 @@
   });
   $("play-brief").addEventListener("click", playBrief);
   $("dismiss-brief").addEventListener("click", markBriefPlayed);
-  $("lang-en").addEventListener("click", () => setLang(false));
-  $("lang-ta").addEventListener("click", () => setLang(true));
+  // On phones only the current language shows, as one button: tapping it switches.
+  const compactLang = () => matchMedia("(max-width: 600px)").matches;
+  $("lang-en").addEventListener("click", () => setLang(compactLang() ? !settings.tamil : false));
+  $("lang-ta").addEventListener("click", () => setLang(compactLang() ? !settings.tamil : true));
   $("mute").addEventListener("click", () => { settings.speak = !settings.speak; saveSettings(); renderMute(); if (!settings.speak) { stopSpeaking(); setState("idle"); } });
   $("open-settings").addEventListener("click", openSettings);
   $("fullscreen").addEventListener("click", toggleFullscreen);

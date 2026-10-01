@@ -11,6 +11,8 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -49,9 +51,11 @@ class MainActivity : ComponentActivity(), NativeBridge.Host {
 
         web = WebView(this)
         web.setBackgroundColor(BG)
-        setContentView(web)
-        // Keep the page clear of the status bar, navigation bar and keyboard.
-        ViewCompat.setOnApplyWindowInsetsListener(web) { v, insets ->
+        // The WebView sits in a frame that keeps it clear of the status bar, navigation bar and
+        // keyboard. (Padding on the WebView itself doesn't move the page, so the frame does it.)
+        val frame = FrameLayout(this).apply { setBackgroundColor(BG); addView(web, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)) }
+        setContentView(frame)
+        ViewCompat.setOnApplyWindowInsetsListener(frame) { v, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
             v.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))

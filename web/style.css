@@ -294,6 +294,23 @@ a { color: var(--cyan); }
   .transcript { min-height: 220px; }
   .brand-sub { display: none; }
 }
+.seg .short { display: none; }
+/* ---------- phones ---------- */
+@media (max-width: 600px) {
+  .topbar { padding: 8px 12px; }
+  .brand-mark { font-size: 18px; letter-spacing: 4px; }
+  .top-actions { gap: 6px; }
+  .icon-btn { width: 34px; height: 34px; }
+  .icon-btn svg { width: 16px; height: 16px; }
+  /* One language button: shows the current language, tap to switch. */
+  .lang .seg:not(.on) { display: none; }
+  .seg { padding: 6px 10px; min-width: 38px; }
+  .seg .long { display: none; }
+  .seg .short { display: inline; }
+  .hud { padding: 8px 12px 16px; gap: 14px; }
+  .reactor { width: min(230px, 30vh); }
+  .center { min-height: calc(100vh - 70px); }
+}
 @media (prefers-reduced-motion: reduce) {
   .ring, .core-halo, .scanline, .mic.live { animation: none !important; }
 }
