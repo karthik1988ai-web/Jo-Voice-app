@@ -23,14 +23,21 @@ jobs:
       - name: Restore signing key
         env:
           JO_KEYSTORE_BASE64: ${{ secrets.JO_KEYSTORE_BASE64 }}
+          JO_KEYSTORE_PASSWORD: ${{ secrets.JO_KEYSTORE_PASSWORD }}
         if: env.JO_KEYSTORE_BASE64 != ''
         run: |
-          echo "$JO_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/jo.keystore"
+          # Stray spaces or line breaks from copy and paste are ignored.
+          printf '%s' "$JO_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/jo.keystore"
+          pw=$(printf '%s' "$JO_KEYSTORE_PASSWORD" | tr -d '[:space:]')
+          echo "::add-mask::$pw"
+          if ! keytool -list -keystore "$RUNNER_TEMP/jo.keystore" -storepass "$pw" > /dev/null 2>&1; then
+            echo "::error::The signing secrets don't match. Re-paste JO_KEYSTORE_PASSWORD and JO_KEYSTORE_BASE64 (only the value, nothing else) under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
           echo "JO_KEYSTORE_FILE=$RUNNER_TEMP/jo.keystore" >> "$GITHUB_ENV"
+          echo "JO_KEYSTORE_PASSWORD=$pw" >> "$GITHUB_ENV"
 
       - name: Build
-        env:
-          JO_KEYSTORE_PASSWORD: ${{ secrets.JO_KEYSTORE_PASSWORD }}
         run: |
           ./gradlew --no-daemon :phone:testDebugUnitTest :phone:assembleDebug
           cp phone/build/outputs/apk/debug/phone-debug.apk Jo.apk
