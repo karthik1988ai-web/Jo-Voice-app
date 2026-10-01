@@ -239,6 +239,30 @@
     }
   }
 
+  /**
+   * Kavery/Thirumal read through the Jo bridge (server side). Supabase refuses secret keys
+   * from browsers, so this is the normal way: no database keys ever live in the browser.
+   */
+  class BridgeApp {
+    constructor(name, app, bridge) { Object.assign(this, { name, app, bridge }); }
+    async call(action, args) {
+      try {
+        return String((await this.bridge.call(action, { app: this.app, ...args })).result);
+      } catch (e) {
+        if (/Unknown action/.test(e.message)) {
+          throw new Error("The Jo bridge in Supabase is an older version. Paste the latest jo-bridge code into the function and deploy it again.");
+        }
+        throw e;
+      }
+    }
+    async summary(date) { return clip(await this.call("app_summary", { date: date || null }), 20000); }
+    async lookup(search, from, to) {
+      return clip(await this.call("app_lookup", { search: search || "", from: from || null, to: to || null }), 40000);
+    }
+    async describe() { return `${this.name} is read through its summary and search functions; use get_app_summary or search_app_records.`; }
+    async query() { throw new Error(`${this.name} can't be queried table by table; use search_app_records.`); }
+  }
+
   const describeMail = (m) =>
     `- ${m.unread ? "UNREAD " : ""}[${m.received ? formatTime(m.received) : ""}]${m.folder ? ` Folder: ${m.folder} |` : ""} From: ${m.from} | Subject: ${m.subject} | ${m.summary} (folderId=${m.folderId}, messageId=${m.messageId})`;
 
@@ -473,7 +497,7 @@
     }
   }
 
-  const api = { describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  const api = { BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);

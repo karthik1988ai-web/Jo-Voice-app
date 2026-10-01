@@ -33,6 +33,7 @@ function setup() {
     JO_BRIDGE_KEY: "secret", ZOHO_CLIENT_ID: "cid", ZOHO_CLIENT_SECRET: "cs",
     SUPABASE_URL: "https://proj.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "sb_secret_x",
     CALENDAR_ICS_URLS: "https://cal.example/basic.ics",
+    KAVERY_URL: "https://kav.supabase.co/", KAVERY_SECRET_KEY: "sb_secret_kav",
   };
   const http = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
@@ -70,6 +71,15 @@ function setup() {
     }
     if (url === "https://mail.zoho.com/api/accounts/77/folders/2/messages/1/content") return j({ data: { content: "<p>Hi</p>" } });
     if (url === "https://cal.example/basic.ics") return new Response(ICS);
+    if (url === "https://kav.supabase.co/rest/v1/rpc/jo_daily_summary") {
+      assertEquals((init!.headers as Record<string, string>).apikey, "sb_secret_kav");
+      assertEquals(JSON.parse(String(init!.body)), { p_date: "2026-10-01" });
+      return j({ orders_on_date: 14 });
+    }
+    if (url === "https://proj.supabase.co/rest/v1/rpc/jo_lookup") {
+      assertEquals((init!.headers as Record<string, string>).apikey, "sb_secret_x"); // the bridge project's own key
+      return j({ matching_invoices: 3 });
+    }
     return j({}, 404);
   }) as typeof fetch;
   const handler = createHandler((n) => env[n], http);
@@ -108,6 +118,15 @@ Deno.test("zoho connect, unread, read", async () => {
   assertEquals(unread.body.mails.map((m: { subject: string; folder: string }) => `${m.folder}:${m.subject}`), ["Reports:MTD sales", "Inbox:GST"]);
   assertEquals(unread.body.mails[1], { messageId: "1", folderId: "2", from: "Bank", subject: "GST", summary: "Due", received: 1759300000000, unread: true, folder: "Inbox" });
   assertEquals((await call({ action: "zoho_read", folderId: "2", messageId: "1" })).body.content, "<p>Hi</p>");
+});
+
+Deno.test("business apps go through the jo_ functions only", async () => {
+  const { call } = setup();
+  assertEquals((await call({ action: "app_summary", app: "kavery", date: "2026-10-01" })).body, { result: '{"orders_on_date":14}' });
+  assertEquals((await call({ action: "app_lookup", app: "thirumal", search: "murugan" })).body, { result: '{"matching_invoices":3}' });
+  const bad = await call({ action: "app_summary", app: "payroll" });
+  assertEquals(bad.status, 400);
+  assert(bad.body.error.includes("kavery or thirumal"));
 });
 
 Deno.test("calendar expands recurring and all-day events", async () => {

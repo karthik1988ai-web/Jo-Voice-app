@@ -10,6 +10,10 @@
 //   ZOHO_CLIENT_SECRET
 //   ZOHO_REGION          com (default), in, eu, com.au, jp
 //   CALENDAR_ICS_URLS    Google Calendar "Secret address in iCal format"; several separated by spaces
+//   KAVERY_URL           Kavery Delivery project URL, e.g. https://xxxx.supabase.co
+//   KAVERY_SECRET_KEY    Kavery's secret key (sb_secret_...). Supabase refuses secret keys from browsers,
+//                        so Jo reads both business apps through this function instead.
+//   THIRUMAL_URL / THIRUMAL_SECRET_KEY   only if Thirumal is NOT the project this function runs in
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase automatically.
 //
 // One table stores the Zoho refresh token (run once in the SQL editor):
@@ -140,6 +144,30 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
     unread: String(m.status) === "0",
   });
 
+  // ---- Business apps (Kavery, Thirumal): only the jo_ read-only functions ----
+  const APP_FUNCTIONS: Record<string, string> = { app_summary: "jo_daily_summary", app_lookup: "jo_lookup" };
+  function appProject(app: string) {
+    const name = app.toUpperCase();
+    if (!/^(KAVERY|THIRUMAL)$/.test(name)) throw new Error("app must be kavery or thirumal");
+    // Thirumal defaults to the project this function runs in.
+    const url = env(`${name}_URL`) || (name === "THIRUMAL" ? env("SUPABASE_URL") : "");
+    const key = env(`${name}_SECRET_KEY`) || (name === "THIRUMAL" ? env("SUPABASE_SERVICE_ROLE_KEY") : "");
+    if (!url || !key) throw new Error(`${app} is not set up in the bridge. Add ${name}_URL and ${name}_SECRET_KEY in Supabase (Edge Functions → Secrets).`);
+    return { url: url.trim().replace(/\/+$/, ""), key: key.trim() };
+  }
+  async function appCall(action: string, app: string, args: Record<string, unknown>) {
+    const { url, key } = appProject(app);
+    const fn = APP_FUNCTIONS[action];
+    const headers: Record<string, string> = { apikey: key, "Content-Type": "application/json" };
+    if (key.startsWith("eyJ")) headers.Authorization = `Bearer ${key}`;
+    const r = await http(`${url}/rest/v1/rpc/${fn}`, { method: "POST", headers, body: JSON.stringify(args) });
+    const text = await r.text();
+    if (r.status === 404) throw new Error(`${app}: function ${fn} not found in that project.`);
+    if (r.status === 401 || r.status === 403) throw new Error(`${app}: the secret key was refused. Check ${app.toUpperCase()}_SECRET_KEY.`);
+    if (!r.ok) throw new Error(`${app} ${fn} error ${r.status}: ${text.slice(0, 200)}`);
+    return text;
+  }
+
   // ---- Calendar (iCal) ----
   async function calendar(from: number, to: number) {
     const urls = (env("CALENDAR_ICS_URLS") ?? "").split(/\s+/).filter(Boolean);
@@ -217,6 +245,10 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
       }
       case "calendar":
         return { events: await calendar(Number(body.from), Number(body.to)) };
+      case "app_summary":
+        return { result: await appCall(action, String(body.app ?? ""), { p_date: body.date || null }) };
+      case "app_lookup":
+        return { result: await appCall(action, String(body.app ?? ""), { p_search: String(body.search ?? ""), p_from: body.from || null, p_to: body.to || null }) };
       default:
         throw new Error(`Unknown action ${action}`);
     }
