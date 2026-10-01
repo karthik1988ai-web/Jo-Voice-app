@@ -99,6 +99,32 @@ If you update the `jo-bridge` code later, paste the new version into the same fu
 
 Notes: Google's iCal feed can lag behind the calendar by up to a few hours. Events you add by voice go into **Jo's agenda** (marked **JO**), not into Google Calendar.
 
+## Google Tasks & Google Calendar (save tasks and meetings in your Google account)
+
+When connected, "remind me to…" creates a task in **Google Tasks** and "add a meeting…" creates an event in **Google Calendar**. Jo also reads your calendar live from Google, so the iCal link isn't needed. The Google sign-in is kept by the Jo bridge; no Google secret is stored in the browser.
+
+**1. Google Cloud (one time, about 10 minutes).** Open https://console.cloud.google.com, signed in with the Google account whose Tasks and Calendar you use.
+- Create a project, e.g. **Jo**.
+- **APIs & Services → Library:** enable **Google Tasks API** and **Google Calendar API**.
+- **Google Auth Platform (OAuth consent screen):** choose **External**, app name **Jo**, and your email as support and contact email.
+  - **Audience:** add your Gmail address as a **test user**, then click **Publish app**. While the app stays in "Testing", Google signs Jo out every 7 days.
+  - **Data access (optional):** add the scopes `.../auth/tasks` and `.../auth/calendar.events`.
+- **Clients → Create client → Web application:**
+  - Under **Authorized redirect URIs**, add exactly `https://karthik1988ai-web.github.io/Jo-Voice-app/`
+  - Click **Create**, then copy the **Client ID** and **Client secret**.
+
+**2. Supabase secrets.** In the project where the bridge runs: Edge Functions → Secrets → add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. If your bridge code is older than this feature, paste the latest `supabase/functions/jo-bridge/index.ts` into the function and click **Deploy**.
+
+**3. Jo.** Open ⚙ Settings → **Google Tasks & Calendar** → **Connect Google**.
+- Sign in. Google shows **"Google hasn't verified this app"**: click **Continue**, since it's your own app.
+- Allow both permissions. You'll come back to Jo with "Google connected".
+- **Test Google** shows how many open tasks you have.
+
+Notes:
+- Google Tasks stores only a due **date**. For "at 5 PM" reminders Jo writes `Jo reminder: YYYY-MM-DD 17:00` into the task's notes and pops up the reminder while Jo is open.
+- Calendar events use Google's own reminders, so they also notify on your phone.
+- Untick **"Save tasks and events to Google"** to go back to saving tasks only in this browser.
+
 ## Jo's voice
 
 ⚙ Settings → **Jo's voice**:

@@ -179,6 +179,40 @@ test("BridgeApp reads Kavery/Thirumal through the bridge", async () => {
   await assert.rejects(old.summary(), /older version/);
 });
 
+test("Google Tasks and Calendar through the bridge", async () => {
+  const calls = [];
+  const remote = [];
+  const http = async (url, init) => {
+    const b = JSON.parse(init.body); calls.push(b);
+    if (b.action === "gtasks_add") { const t = { id: "g" + remote.length, title: b.title, due: b.due, notes: b.notes, done: false }; remote.push(t); return json({ task: t }); }
+    if (b.action === "gtasks_list") return json({ tasks: remote });
+    if (b.action === "gtasks_update") { const t = remote.find((x) => x.id === b.id); t.done = b.done; return json({ task: t }); }
+    if (b.action === "gtasks_delete") return json({ deleted: true });
+    if (b.action === "gcal_list") return json({ events: [{ title: "Britannia rep", start: b.from + 11 * 3600000, end: b.from + 12 * 3600000, allDay: false, location: "" }] });
+    if (b.action === "gcal_add") return json({ event: { title: b.title, start: b.start, end: b.end } });
+    return json({ error: "x" }, 400);
+  };
+  const bridge = new Jo.Bridge("u", "k", http);
+  const local = new Jo.TaskStore(memoryStorage());
+  const tools = new Jo.Tools({ bridge, tasks: local, google: new Jo.GoogleWorkspace(bridge) });
+  assert.match(await tools.call("add_task", { title: "Call supplier", due: "2026-10-01 17:00" }), /Added to Google Tasks: .*Call supplier/);
+  const add = calls.find((c) => c.action === "gtasks_add");
+  assert.equal(add.due, "2026-10-01T00:00:00.000Z");
+  assert.equal(add.notes, "Jo reminder: 2026-10-01 17:00");
+  assert.equal(local.all().length, 0, "nothing stored only in the browser");
+  const [t] = await tools.taskList();
+  assert.equal(new Date(t.remindAt).getHours(), 17);
+  assert.match(await tools.call("list_tasks"), /Call supplier \(.*5:00/);
+  assert.match(await tools.call("complete_task", { task_id: "g0" }), /Done in Google Tasks: Call supplier/);
+  assert.match(await tools.call("delete_task", { task_id: "g0" }), /Deleted from Google Tasks/);
+  assert.match(await tools.call("add_event", { title: "Dentist", start: "2026-10-02 18:00" }), /Added to Google Calendar/);
+  const ev = calls.find((c) => c.action === "gcal_add");
+  assert.equal(ev.end - ev.start, 3600000);
+  assert.ok(ev.timeZone);
+  assert.match(await tools.call("list_events", { days: 1 }), /Britannia rep/);
+  assert.ok(!calls.some((c) => c.action === "calendar"), "uses Google Calendar API, not the iCal link");
+});
+
 test("TaskStore ordering, done and delete", () => {
   const s = new Jo.TaskStore(memoryStorage());
   const a = s.add("A"); const b = s.add("B", Jo.parseLocal("2026-10-02 09:30"));

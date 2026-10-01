@@ -235,6 +235,7 @@ a { color: var(--cyan); }
 .tasks .t { flex: 1; }
 .tasks .due { font-size: 13px; color: var(--muted); }
 .tasks .due.soon { color: var(--amber); }
+.g-tag { font-family: var(--head); font-size: 9px; color: #8ab4ff; border: 1px solid rgba(138, 180, 255, .5); padding: 0 4px; margin-left: 6px; vertical-align: middle; }
 .tasks li.done .t { text-decoration: line-through; color: var(--muted); }
 .tasks .del { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 15px; }
 .tasks .del:hover { color: var(--red); }
