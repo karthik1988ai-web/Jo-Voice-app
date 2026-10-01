@@ -22,7 +22,7 @@
 
   const DEFAULTS = {
     geminiKey: "", geminiModel: DEFAULT_MODEL, bridgeUrl: "", bridgeKey: "",
-    kavery: { url: "", key: "", tables: "", fn: "" }, thirumal: { url: "", key: "", tables: "", fn: "" },
+    kavery: { url: "", key: "", tables: "", fn: "", lookupFn: "" }, thirumal: { url: "", key: "", tables: "", fn: "", lookupFn: "" },
     tamil: false, speak: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
@@ -55,7 +55,7 @@
   const reactor = $("reactor"), stateEl = $("state");
   const TOOL_LABELS = {
     get_unread_mail: "CHECKING MAIL", search_mail: "SEARCHING MAIL", read_mail: "READING MAIL",
-    get_app_summary: "QUERYING BUSINESS DATA", describe_app_tables: "SCANNING DATABASE", query_app_data: "QUERYING DATABASE",
+    get_app_summary: "QUERYING BUSINESS DATA", search_app_records: "SEARCHING RECORDS", describe_app_tables: "SCANNING DATABASE", query_app_data: "QUERYING DATABASE",
     list_tasks: "CHECKING TASKS", add_task: "ADDING TASK", complete_task: "UPDATING TASK", delete_task: "UPDATING TASK",
     list_events: "CHECKING AGENDA", add_event: "ADDING TO AGENDA",
   };

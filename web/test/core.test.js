@@ -85,6 +85,7 @@ test("Supabase summary, describe and query with sb_ secret key", async () => {
     if (u.pathname === "/rest/v1/orders") return json([{ id: 1, status: "pending" }], 200, { "Content-Range": "0-0/9" });
     if (u.pathname === "/rest/v1/riders" && u.searchParams.has("order")) return json({ message: "no created_at" }, 400);
     if (u.pathname === "/rest/v1/riders") return json([{ name: "Ravi" }], 200, { "Content-Range": "0-0/4" });
+    if (u.pathname === "/rest/v1/rpc/jo_lookup") { assert.deepEqual(JSON.parse(init.body), { p_search: "murugan", p_from: "2026-09-01", p_to: null }); return json({ matching_invoices: 3, due: 1200 }); }
     if (u.pathname === "/rest/v1/rpc/jo_daily_summary") { assert.equal(init.body, '{"p_date":"2026-10-01"}'); return json({ orders: 14 }); }
     return json({}, 404);
   };
@@ -101,9 +102,11 @@ test("Supabase summary, describe and query with sb_ secret key", async () => {
   assert.equal(last.searchParams.get("status"), "eq.pending");
   assert.equal(last.searchParams.get("limit"), "10");
   await assert.rejects(s.query("users"), /not in the allowed list/);
-  const rpc = new Jo.Supabase("Kavery", { url: "https://p.supabase.co", key: "eyJabc", fn: "jo_daily_summary" }, http);
+  const rpc = new Jo.Supabase("Kavery", { url: "https://p.supabase.co", key: "eyJabc", fn: "jo_daily_summary", lookupFn: "jo_lookup" }, http);
   assert.equal(await rpc.summary("2026-10-01"), '{"orders":14}');
   assert.equal(seen.at(-1).headers.Authorization, "Bearer eyJabc");
+  assert.equal(await rpc.lookup("murugan", "2026-09-01"), '{"matching_invoices":3,"due":1200}');
+  await assert.rejects(s.lookup("x"), /No lookup function set/);
 });
 
 test("Tools: mail via bridge, events merge, missing sources", async () => {
