@@ -1,7 +1,7 @@
 /* Jo UI: wires the HUD to JoCore (voice, panels, settings, brief and reminders). */
 (function () {
   "use strict";
-  const { Gemini, Supabase, Bridge, TaskStore, Tools, Agent, DEFAULT_MODEL, formatTime, isoDate, startOfToday } = window.JoCore;
+  const { Gemini, Supabase, Bridge, BridgeApp, TaskStore, Tools, Agent, DEFAULT_MODEL, formatTime, isoDate, startOfToday } = window.JoCore;
   const formatAgo = (ms) => {
     const min = Math.round((Date.now() - ms) / 60000);
     if (min < 1) return "just now";
@@ -22,7 +22,8 @@
 
   const DEFAULTS = {
     geminiKey: "", geminiModel: DEFAULT_MODEL, bridgeUrl: "", bridgeKey: "",
-    kavery: { url: "", key: "", tables: "", fn: "", lookupFn: "" }, thirumal: { url: "", key: "", tables: "", fn: "", lookupFn: "" },
+    kavery: { viaBridge: true, url: "", key: "", tables: "", fn: "", lookupFn: "" },
+    thirumal: { viaBridge: true, url: "", key: "", tables: "", fn: "", lookupFn: "" },
     tamil: false, speak: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
@@ -37,11 +38,14 @@
   // ---------- Jo's brain ----------
   let agent = null;
   function buildTools() {
-    const sb = (name, c) => (c.url && c.key ? new Supabase(name, c) : null);
+    const bridge = settings.bridgeUrl && settings.bridgeKey ? new Bridge(settings.bridgeUrl, settings.bridgeKey) : null;
+    // Through the bridge by default; a direct connection only if switched off and a URL + key are set.
+    const app = (name, id, c) => (c.viaBridge !== false ? (bridge ? new BridgeApp(name, id, bridge) : null)
+      : (c.url && c.key ? new Supabase(name, c) : null));
     return new Tools({
-      bridge: settings.bridgeUrl && settings.bridgeKey ? new Bridge(settings.bridgeUrl, settings.bridgeKey) : null,
-      kavery: sb("Kavery Delivery", settings.kavery),
-      thirumal: sb("Thirumal", settings.thirumal),
+      bridge,
+      kavery: app("Kavery Delivery", "kavery", settings.kavery),
+      thirumal: app("Thirumal", "thirumal", settings.thirumal),
       tasks,
     });
   }
@@ -201,7 +205,7 @@
   function renderSystems() {
     const configured = {
       gemini: !!settings.geminiKey, mail: !!(settings.bridgeUrl && settings.bridgeKey), calendar: !!(settings.bridgeUrl && settings.bridgeKey),
-      kavery: !!(settings.kavery.url && settings.kavery.key), thirumal: !!(settings.thirumal.url && settings.thirumal.key),
+      kavery: !!buildTools().kavery, thirumal: !!buildTools().thirumal,
     };
     const rows = [["gemini", "Gemini AI core"], ["mail", "Zoho Mail"], ["kavery", "Kavery Delivery"], ["thirumal", "Thirumal accounts"], ["calendar", "Google Calendar"]];
     $("systems").innerHTML = rows.map(([k, label]) => {
@@ -351,10 +355,14 @@
     $("settings").hidden = false; $("drawer-backdrop").hidden = false;
   }
   function closeSettings() { $("settings").hidden = true; $("drawer-backdrop").hidden = true; }
+  let removedSecret = false;
   function collectSettings() {
     document.querySelectorAll("[data-setting]").forEach((el) => setField(el.dataset.setting,
       el.type === "checkbox" ? el.checked : el.type === "number" ? Math.max(0, Number(el.value) || 0) : el.value.trim()));
     if (!settings.geminiModel) settings.geminiModel = DEFAULT_MODEL;
+    ["kavery", "thirumal"].forEach((k) => {
+      if (/^sb_secret_/.test(settings[k].key)) { settings[k].key = ""; removedSecret = true; }
+    });
     saveSettings();
     agent = null;
     renderSystems();
@@ -394,7 +402,7 @@
         }
         case "kavery": case "thirumal": {
           const src = tools[kind];
-          if (!src) throw new Error("Fill in the project URL and key first.");
+          if (!src) throw new Error(settings[kind].viaBridge !== false ? "Fill in the Jo bridge URL and key first." : "Fill in the project URL and key first.");
           result = await src.summary();
           setHealth(kind, "ok"); break;
         }
@@ -439,7 +447,14 @@
   $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", closeSettings);
   $("drawer-backdrop").addEventListener("click", closeSettings);
-  $("save-settings").addEventListener("click", () => { collectSettings(); $("test-out").textContent = "Saved."; renderAgenda(); checkMail(); });
+  $("save-settings").addEventListener("click", () => {
+    collectSettings();
+    $("test-out").textContent = removedSecret
+      ? "Saved. A Supabase secret key was removed from this browser (Supabase blocks them here); the bridge holds it instead."
+      : "Saved.";
+    removedSecret = false;
+    renderAgenda(); checkMail();
+  });
   document.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", () => runTest(b.dataset.test)));
   $("refresh-agenda").addEventListener("click", renderAgenda);
   $("refresh-mail").addEventListener("click", checkMail);

@@ -250,6 +250,8 @@ a { color: var(--cyan); }
 .drawer label input:not([type=checkbox]) { display: block; width: 100%; margin-top: 4px; padding: 9px 10px; background: rgba(2, 10, 20, .8); border: 1px solid var(--line); outline: none; color-scheme: dark; }
 .drawer label input:focus { border-color: var(--cyan); }
 .drawer label.row { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.drawer details.direct { margin: 6px 0; }
+.drawer details.direct summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .hint { font-size: 13px; color: var(--muted); margin: 4px 0 8px; overflow-wrap: anywhere; }
 .test { margin-top: 6px; padding: 7px 14px; background: transparent; border: 1px solid var(--cyan-dim); color: var(--cyan); cursor: pointer; }
 .test:hover { background: rgba(62, 230, 255, .1); }

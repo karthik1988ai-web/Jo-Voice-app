@@ -83,6 +83,16 @@ alter table public.jo_bridge_settings enable row level security;  -- no policies
 **f) Connect Jo:** in Jo's settings fill in **Bridge URL** (`https://<project-ref>.supabase.co/functions/v1/jo-bridge`) and **Bridge key** (your `JO_BRIDGE_KEY`), then click **Test mail & calendar**.
 Then in Zoho's Self Client go to **Generate Code**, with scope `ZohoMail.accounts.READ,ZohoMail.messages.READ,ZohoMail.folders.READ`, duration 10 minutes, and click **Create**. Paste the code into Jo's **Zoho grant code** field and click **Connect Zoho Mail**. You only do this once.
 
+**Kavery and Thirumal through the bridge (recommended):** Supabase refuses secret keys used from a browser, so Jo reads both apps through this function. Add these secrets too:
+
+| Name | Value |
+|---|---|
+| `KAVERY_URL` | Kavery's project URL, e.g. `https://xxxx.supabase.co` |
+| `KAVERY_SECRET_KEY` | Kavery's secret key (`sb_secret_…`) |
+| `THIRUMAL_URL`, `THIRUMAL_SECRET_KEY` | only if the bridge is **not** running in the Thirumal project |
+
+The bridge only calls the read-only `jo_daily_summary` and `jo_lookup` functions in those projects. In Jo's settings keep **"Read through the Jo bridge"** ticked for both apps.
+
 **New-mail watch:** while Jo is open, it checks **all incoming Zoho folders** (Inbox and your own folders; Sent, Drafts, Templates, Outbox and Trash are skipped). By default it checks every 3 minutes; change the interval in Settings, where 0 turns it off. New emails appear in the **Mail** panel with their folder name, pop up as desktop notifications, and are announced aloud. "Announce new emails aloud" in Settings turns the spoken part off. Click an email in the panel and Jo reads it to you. The first check after opening Jo only learns what's already unread, so old mail isn't announced.
 
 If you update the `jo-bridge` code later, paste the new version into the same function in Supabase and click **Deploy** again.

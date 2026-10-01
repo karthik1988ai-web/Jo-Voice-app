@@ -155,21 +155,29 @@
 
     <section>
       <h3>Kavery Delivery · Supabase</h3>
-      <label>Project URL<input data-setting="kavery.url" placeholder="https://xxxx.supabase.co"></label>
-      <label>API key (secret)<input type="password" data-setting="kavery.key"></label>
-      <label>Tables Jo may read<input data-setting="kavery.tables" placeholder="orders, deliveries, payments"></label>
-      <label>Summary function (optional)<input data-setting="kavery.fn" placeholder="jo_daily_summary"></label>
-      <label>Lookup function (optional)<input data-setting="kavery.lookupFn" placeholder="jo_lookup"></label>
+      <label class="row"><input type="checkbox" data-setting="kavery.viaBridge"> Read through the Jo bridge (recommended)</label>
+      <p class="hint">The bridge reads the jo_daily_summary and jo_lookup functions with the secret key stored in Supabase; no database key is kept in this browser. Untick only for a direct connection with a publishable key.</p>
+      <details class="direct"><summary>Direct connection (advanced)</summary>
+        <label>Project URL<input data-setting="kavery.url" placeholder="https://xxxx.supabase.co"></label>
+        <label>API key (publishable / anon)<input type="password" data-setting="kavery.key"></label>
+        <label>Tables Jo may read<input data-setting="kavery.tables" placeholder="orders, deliveries, payments"></label>
+        <label>Summary function (optional)<input data-setting="kavery.fn" placeholder="jo_daily_summary"></label>
+        <label>Lookup function (optional)<input data-setting="kavery.lookupFn" placeholder="jo_lookup"></label>
+      </details>
       <button class="test" data-test="kavery">Test Kavery</button>
     </section>
 
     <section>
       <h3>Thirumal accounts · Supabase</h3>
-      <label>Project URL<input data-setting="thirumal.url" placeholder="https://xxxx.supabase.co"></label>
-      <label>API key (secret)<input type="password" data-setting="thirumal.key"></label>
-      <label>Tables Jo may read<input data-setting="thirumal.tables" placeholder="sales, receipts, customers"></label>
-      <label>Summary function (optional)<input data-setting="thirumal.fn" placeholder="jo_daily_summary"></label>
-      <label>Lookup function (optional)<input data-setting="thirumal.lookupFn" placeholder="jo_lookup"></label>
+      <label class="row"><input type="checkbox" data-setting="thirumal.viaBridge"> Read through the Jo bridge (recommended)</label>
+      <p class="hint">The bridge reads the jo_daily_summary and jo_lookup functions with the secret key stored in Supabase; no database key is kept in this browser. Untick only for a direct connection with a publishable key.</p>
+      <details class="direct"><summary>Direct connection (advanced)</summary>
+        <label>Project URL<input data-setting="thirumal.url" placeholder="https://xxxx.supabase.co"></label>
+        <label>API key (publishable / anon)<input type="password" data-setting="thirumal.key"></label>
+        <label>Tables Jo may read<input data-setting="thirumal.tables" placeholder="sales, receipts, customers"></label>
+        <label>Summary function (optional)<input data-setting="thirumal.fn" placeholder="jo_daily_summary"></label>
+        <label>Lookup function (optional)<input data-setting="thirumal.lookupFn" placeholder="jo_lookup"></label>
+      </details>
       <button class="test" data-test="thirumal">Test Thirumal</button>
     </section>
 

@@ -140,6 +140,27 @@ test("Tools: mail via bridge, events merge, missing sources", async () => {
   assert.match(await noBridge.call("get_unread_mail"), /Zoho Mail is not connected/);
 });
 
+test("BridgeApp reads Kavery/Thirumal through the bridge", async () => {
+  const sent = [];
+  const http = async (url, init) => {
+    const b = JSON.parse(init.body); sent.push(b);
+    if (b.action === "app_summary") return json({ result: '{"orders_on_date":14}' });
+    if (b.action === "app_lookup") return json({ result: '{"matching_orders":3}' });
+    return json({ error: "x" }, 400);
+  };
+  const bridge = new Jo.Bridge("https://p.supabase.co/functions/v1/smooth-api", "bk", http);
+  const tools = new Jo.Tools({ kavery: new Jo.BridgeApp("Kavery Delivery", "kavery", bridge), tasks: new Jo.TaskStore(memoryStorage()) });
+  assert.equal(await tools.call("get_app_summary", { app: "kavery", date: "2026-10-01" }), '{"orders_on_date":14}');
+  assert.equal(await tools.call("search_app_records", { app: "kavery", search: "murugan" }), '{"matching_orders":3}');
+  assert.deepEqual(sent, [
+    { action: "app_summary", app: "kavery", date: "2026-10-01" },
+    { action: "app_lookup", app: "kavery", search: "murugan", from: null, to: null },
+  ]);
+  assert.match(await tools.call("query_app_data", { app: "kavery", table: "orders" }), /use search_app_records/);
+  const old = new Jo.BridgeApp("Kavery", "kavery", new Jo.Bridge("u", "k", async () => json({ error: "Unknown action app_summary" }, 400)));
+  await assert.rejects(old.summary(), /older version/);
+});
+
 test("TaskStore ordering, done and delete", () => {
   const s = new Jo.TaskStore(memoryStorage());
   const a = s.add("A"); const b = s.add("B", Jo.parseLocal("2026-10-02 09:30"));
