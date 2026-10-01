@@ -64,6 +64,7 @@
     list_events: "CHECKING AGENDA", add_event: "ADDING TO AGENDA",
   };
   function setState(mode, label) {
+    window.JoGraph?.setActivity(mode);
     reactor.className = `reactor ${mode}`;
     stateEl.className = `state ${mode}`;
     stateEl.textContent = label || {
@@ -481,30 +482,6 @@
     document.removeEventListener("click", once);
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
   });
-
-  // ---------- background particles ----------
-  (function particles() {
-    const c = $("particles"), ctx = c.getContext("2d");
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    let w, h, pts;
-    const resize = () => {
-      w = c.width = innerWidth; h = c.height = innerHeight;
-      pts = Array.from({ length: Math.round((w * h) / 26000) }, () => ({ x: Math.random() * w, y: Math.random() * h, vx: (Math.random() - .5) * .25, vy: (Math.random() - .5) * .25 }));
-    };
-    resize(); addEventListener("resize", resize);
-    (function frame() {
-      ctx.clearRect(0, 0, w, h);
-      for (const p of pts) {
-        p.x = (p.x + p.vx + w) % w; p.y = (p.y + p.vy + h) % h;
-        ctx.fillStyle = "rgba(62,230,255,.55)"; ctx.fillRect(p.x, p.y, 1.6, 1.6);
-      }
-      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
-        const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y, d = dx * dx + dy * dy;
-        if (d < 110 * 110) { ctx.strokeStyle = `rgba(62,230,255,${0.12 * (1 - Math.sqrt(d) / 110)})`; ctx.beginPath(); ctx.moveTo(pts[i].x, pts[i].y); ctx.lineTo(pts[j].x, pts[j].y); ctx.stroke(); }
-      }
-      requestAnimationFrame(frame);
-    })();
-  })();
 
   // ---------- start ----------
   setLang(settings.tamil); renderMute(); renderSystems(); renderTasks(); tickClock(); setState("idle");
