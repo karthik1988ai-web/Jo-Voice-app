@@ -2,6 +2,13 @@
 (function () {
   "use strict";
   const { Gemini, Supabase, Bridge, TaskStore, Tools, Agent, DEFAULT_MODEL, formatTime, isoDate, startOfToday } = window.JoCore;
+  const formatAgo = (ms) => {
+    const min = Math.round((Date.now() - ms) / 60000);
+    if (min < 1) return "just now";
+    if (min < 60) return `${min} min ago`;
+    if (min < 24 * 60) return `${Math.round(min / 60)} h ago`;
+    return formatTime(ms);
+  };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
@@ -16,7 +23,7 @@
   const DEFAULTS = {
     geminiKey: "", geminiModel: DEFAULT_MODEL, bridgeUrl: "", bridgeKey: "",
     kavery: { url: "", key: "", tables: "", fn: "" }, thirumal: { url: "", key: "", tables: "", fn: "" },
-    tamil: false, speak: true, briefEnabled: true, briefTime: "08:00",
+    tamil: false, speak: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
   settings.kavery = { ...DEFAULTS.kavery, ...settings.kavery };
@@ -277,6 +284,62 @@
     else if (last?.date === isoDate() && !last.played) $("brief-banner").hidden = false;
   }
 
+  // ---------- new-mail watch (all Zoho folders, via the bridge) ----------
+  let mailTimer = null, mailBusy = false;
+  async function checkMail() {
+    const bridge = buildTools().bridge;
+    if (!bridge) { $("mail").innerHTML = '<li class="muted">Zoho Mail not connected.</li>'; $("mail-count").textContent = ""; return; }
+    if (mailBusy) return;
+    mailBusy = true;
+    try {
+      const { mails } = await bridge.call("zoho_unread", { limit: 30 });
+      setHealth("mail", "ok");
+      const stored = readJson("jo.mailSeen", null);
+      const seen = new Set(stored || []);
+      const fresh = mails.filter((m) => !seen.has(m.messageId));
+      mails.forEach((m) => seen.add(m.messageId));
+      storage.setItem("jo.mailSeen", JSON.stringify([...seen].slice(-500)));
+      renderMail(mails, new Set(fresh.map((m) => m.messageId)));
+      // The first check only learns what's already there, so Jo doesn't announce old mail.
+      if (stored && fresh.length) announceMail(fresh);
+    } catch (e) {
+      setHealth("mail", "err");
+      $("mail").innerHTML = `<li class="muted">${esc(e.message)}</li>`;
+    } finally { mailBusy = false; }
+  }
+
+  function renderMail(mails, freshIds) {
+    $("mail-count").textContent = mails.length ? `${mails.length}${mails.length >= 30 ? "+" : ""} UNREAD` : "";
+    $("mail").innerHTML = mails.length ? mails.slice(0, 6).map((m) => `
+      <li class="${freshIds.has(m.messageId) ? "fresh" : ""}" data-from="${esc(m.from)}" data-subject="${esc(m.subject)}" title="Ask Jo to read this email">
+        <div class="from">${esc(m.from)}</div>
+        <div class="subj">${esc(m.subject || "(no subject)")}</div>
+        <div class="meta">${m.folder ? `<span class="folder">${esc(m.folder.toUpperCase())}</span>` : ""}${esc(m.received ? formatAgo(m.received) : "")}</div>
+      </li>`).join("") : '<li class="muted">No unread mail. All clear.</li>';
+  }
+
+  function announceMail(fresh) {
+    fresh.slice(0, 3).forEach((m) => {
+      const where = m.folder ? ` in ${m.folder}` : "";
+      notify(`New email${where}`, `${m.from}: ${m.subject}`, () => window.focus());
+      addMsg("jo", `New email${where} from ${m.from}: ${m.subject}`);
+    });
+    if (fresh.length > 3) addMsg("jo", `…and ${fresh.length - 3} more new emails.`);
+    const latest = fresh[0];
+    const line = fresh.length === 1
+      ? `New email from ${latest.from}${latest.folder ? `, in ${latest.folder}` : ""}: ${latest.subject}`
+      : `You have ${fresh.length} new emails. The latest is from ${latest.from}: ${latest.subject}`;
+    toast(line);
+    const speaking = "speechSynthesis" in window && speechSynthesis.speaking;
+    if (settings.announceMail && navigator.userActivation?.hasBeenActive && !busy && !speaking && !rec) speak(line);
+  }
+
+  function scheduleMail() {
+    clearInterval(mailTimer);
+    const minutes = Number(settings.mailCheckMinutes) || 0;
+    if (minutes > 0 && settings.bridgeUrl && settings.bridgeKey) mailTimer = setInterval(checkMail, Math.max(minutes, 1) * 60000);
+  }
+
   // ---------- settings drawer ----------
   const field = (path) => path.split(".").reduce((o, k) => o?.[k], settings);
   const setField = (path, v) => { const keys = path.split("."), last = keys.pop(); keys.reduce((o, k) => o[k], settings)[last] = v; };
@@ -289,11 +352,13 @@
   }
   function closeSettings() { $("settings").hidden = true; $("drawer-backdrop").hidden = true; }
   function collectSettings() {
-    document.querySelectorAll("[data-setting]").forEach((el) => setField(el.dataset.setting, el.type === "checkbox" ? el.checked : el.value.trim()));
+    document.querySelectorAll("[data-setting]").forEach((el) => setField(el.dataset.setting,
+      el.type === "checkbox" ? el.checked : el.type === "number" ? Math.max(0, Number(el.value) || 0) : el.value.trim()));
     if (!settings.geminiModel) settings.geminiModel = DEFAULT_MODEL;
     saveSettings();
     agent = null;
     renderSystems();
+    scheduleMail();
   }
 
   async function runTest(kind) {
@@ -324,6 +389,7 @@
           await tools.bridge.call("zoho_connect", { code });
           $("zoho-code").value = "";
           setHealth("mail", "ok");
+          checkMail();
           result = "Zoho Mail connected."; break;
         }
         case "kavery": case "thirumal": {
@@ -373,9 +439,14 @@
   $("open-settings").addEventListener("click", openSettings);
   $("close-settings").addEventListener("click", closeSettings);
   $("drawer-backdrop").addEventListener("click", closeSettings);
-  $("save-settings").addEventListener("click", () => { collectSettings(); $("test-out").textContent = "Saved."; renderAgenda(); });
+  $("save-settings").addEventListener("click", () => { collectSettings(); $("test-out").textContent = "Saved."; renderAgenda(); checkMail(); });
   document.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", () => runTest(b.dataset.test)));
   $("refresh-agenda").addEventListener("click", renderAgenda);
+  $("refresh-mail").addEventListener("click", checkMail);
+  $("mail").addEventListener("click", (e) => {
+    const li = e.target.closest("li[data-from]"); if (!li) return;
+    ask(`Read me the email from ${li.dataset.from} with subject "${li.dataset.subject}".`);
+  });
 
   $("add-task").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -431,4 +502,5 @@
   setInterval(checkBrief, 60000);
   setInterval(renderAgenda, 10 * 60000);
   checkReminders(); checkBrief();
+  checkMail(); scheduleMail();
 })();

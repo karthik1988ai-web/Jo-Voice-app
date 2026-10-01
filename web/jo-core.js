@@ -217,7 +217,7 @@
   }
 
   const describeMail = (m) =>
-    `- ${m.unread ? "UNREAD " : ""}[${m.received ? formatTime(m.received) : ""}] From: ${m.from} | Subject: ${m.subject} | ${m.summary} (folderId=${m.folderId}, messageId=${m.messageId})`;
+    `- ${m.unread ? "UNREAD " : ""}[${m.received ? formatTime(m.received) : ""}]${m.folder ? ` Folder: ${m.folder} |` : ""} From: ${m.from} | Subject: ${m.subject} | ${m.summary} (folderId=${m.folderId}, messageId=${m.messageId})`;
 
   // ---------- tasks & Jo's own agenda (stored in the browser) ----------
   class TaskStore {
@@ -257,7 +257,7 @@
   };
 
   const FUNCTIONS = [
-    fn("get_unread_mail", "List unread emails in the Zoho Mail inbox, newest first.", { limit: ["integer", "How many, default 10"] }),
+    fn("get_unread_mail", "List unread emails across all Zoho Mail folders (Inbox and custom folders), newest first, with the folder name.", { limit: ["integer", "How many, default 10"] }),
     fn("search_mail", "Search Zoho Mail. Plain words search everything; Zoho syntax like subject:xyz or sender:a@b.com also works.",
       { query: ["string", "Search words"], limit: ["integer", "How many, default 8"] }, ["query"]),
     fn("read_mail", "Read the full text of one email found by get_unread_mail or search_mail.",
@@ -444,7 +444,7 @@
     }
   }
 
-  const api = { DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  const api = { describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);

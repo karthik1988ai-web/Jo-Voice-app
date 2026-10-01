@@ -105,6 +105,9 @@
     <h2 class="panel-title"><span>Agenda</span><button class="mini" id="refresh-agenda" title="Refresh">↻</button></h2>
     <ul class="agenda" id="agenda"><li class="muted">Loading…</li></ul>
 
+    <h2 class="panel-title"><span>Mail</span><span class="mail-count" id="mail-count"></span><button class="mini" id="refresh-mail" title="Check mail now">↻</button></h2>
+    <ul class="mail" id="mail"><li class="muted">Zoho Mail not connected.</li></ul>
+
     <h2 class="panel-title"><span>Tasks</span></h2>
     <form class="add-task" id="add-task">
       <input id="task-title" placeholder="New task" aria-label="New task">
@@ -146,6 +149,8 @@
       <label>Zoho grant code (Self Client › Generate code)<input id="zoho-code"></label>
       <p class="hint">Scopes: ZohoMail.accounts.READ,ZohoMail.messages.READ,ZohoMail.folders.READ</p>
       <button class="test" data-test="zoho-connect">Connect Zoho Mail</button>
+      <label>Check for new mail every (minutes, 0 = off)<input type="number" min="0" max="60" data-setting="mailCheckMinutes"></label>
+      <label class="row"><input type="checkbox" data-setting="announceMail"> Announce new emails aloud</label>
     </section>
 
     <section>
