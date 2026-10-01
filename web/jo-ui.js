@@ -1,7 +1,7 @@
 /* Jo UI: wires the HUD to JoCore (voice, panels, settings, brief and reminders). */
 (function () {
   "use strict";
-  const { Gemini, Supabase, Bridge, BridgeApp, GoogleWorkspace, TaskStore, Tools, Agent, DEFAULT_MODEL, DEFAULT_TTS_MODEL, GEMINI_VOICES, formatTime, isoDate, startOfToday } = window.JoCore;
+  const { matchWake, Gemini, Supabase, Bridge, BridgeApp, GoogleWorkspace, TaskStore, Tools, Agent, DEFAULT_MODEL, DEFAULT_TTS_MODEL, GEMINI_VOICES, formatTime, isoDate, startOfToday } = window.JoCore;
   const formatAgo = (ms) => {
     const min = Math.round((Date.now() - ms) / 60000);
     if (min < 1) return "just now";
@@ -27,7 +27,7 @@
     tamil: false, speak: true,
     googleConnected: false, googleTasks: true,
     voiceEngine: "gemini", geminiVoiceEn: "Charon", geminiVoiceTa: "Kore", pcVoiceEn: "", pcVoiceTa: "", ttsModel: "",
-    briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
+    wakeWord: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
   settings.kavery = { ...DEFAULTS.kavery, ...settings.kavery };
@@ -73,8 +73,10 @@
     reactor.className = `reactor ${mode}`;
     stateEl.className = `state ${mode}`;
     stateEl.textContent = label || {
-      idle: matchMedia("(pointer: coarse)").matches ? "STANDING BY · TAP TO TALK" : "STANDING BY · PRESS SPACE OR TAP TO TALK", listening: "LISTENING…", thinking: "PROCESSING…", speaking: "SPEAKING", error: "ATTENTION",
+      idle: wakeOn() ? 'STANDING BY · SAY "JO"' : matchMedia("(pointer: coarse)").matches ? "STANDING BY · TAP TO TALK" : "STANDING BY · PRESS SPACE OR TAP TO TALK", listening: "LISTENING…", thinking: "PROCESSING…", speaking: "SPEAKING", error: "ATTENTION",
     }[mode];
+    // The wake-word ear only runs while Jo is idle, so it never hears Jo's own voice.
+    if (mode === "idle") scheduleWake(); else stopWake();
   }
 
   // Audio-style bars around the core (animated while speaking/listening)
@@ -234,10 +236,12 @@
   // ---------- speech in ----------
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null;
-  function listen() {
+  async function listen() {
     if (rec) { rec.stop(); return; }
     if (!Recognition) { toast("Voice input needs Chrome or Edge. You can still type."); return; }
     stopSpeaking();
+    await stopWake();
+    if (rec) return;
     rec = new Recognition();
     rec.lang = settings.tamil ? "ta-IN" : "en-IN";
     rec.interimResults = true;
@@ -262,6 +266,86 @@
       if (text) { input.value = ""; ask(text); } else setState("idle");
     };
     rec.start();
+  }
+
+  // ---------- wake word: say "Jo" ----------
+  // A second recogniser listens in the background while Jo is idle. "Jo" alone opens the
+  // mic for a command; "Jo, check my mail" asks straight away.
+  let wakeRec = null, wakeTimer = null, wakeFails = 0, wakeStopped = null;
+  const wakeOn = () => !!(settings.wakeWord && Recognition);
+  function scheduleWake(delay = 400) {
+    clearTimeout(wakeTimer);
+    if (wakeOn()) wakeTimer = setTimeout(startWake, delay);
+  }
+  function startWake() {
+    if (!wakeOn() || wakeRec || rec || busy || isSpeaking() || !reactor.classList.contains("idle")) return;
+    const r = new Recognition();
+    r.lang = settings.tamil ? "ta-IN" : "en-IN";
+    r.continuous = true;
+    r.interimResults = true;
+    let heard = null, waitTimer = null;
+    const fire = (command) => { heard = command; clearTimeout(waitTimer); r.abort(); };
+    r.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const m = matchWake(e.results[i][0].transcript);
+        if (!m) continue;
+        wakeFails = 0;
+        if (e.results[i].isFinal) return fire(m.command);
+        // Heard "Jo" mid-sentence: wait a moment for the rest, then go anyway.
+        clearTimeout(waitTimer);
+        waitTimer = setTimeout(() => fire(m.command), m.command ? 1500 : 900);
+      }
+    };
+    r.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        settings.wakeWord = false; saveSettings(); renderWake();
+        toast('Microphone blocked, so "Jo" can\'t hear you. Allow the mic in the address bar, then turn the ear back on.');
+      } else if (e.error !== "no-speech" && e.error !== "aborted") wakeFails++;
+    };
+    r.onend = () => {
+      clearTimeout(waitTimer);
+      wakeRec = null;
+      if (wakeStopped) { wakeStopped(); wakeStopped = null; }
+      $("wake").classList.remove("live");
+      if (heard !== null) {
+        chime();
+        if (heard) ask(heard); else listen();
+      } else scheduleWake(Math.min(30000, 400 * 2 ** wakeFails)); // back off if the network keeps failing
+    };
+    wakeRec = r;
+    try { r.start(); $("wake").classList.add("live"); } catch { wakeRec = null; scheduleWake(2000); }
+  }
+  function stopWake() {
+    clearTimeout(wakeTimer);
+    if (!wakeRec) return Promise.resolve();
+    const done = new Promise((res) => { wakeStopped = res; });
+    wakeRec.abort();
+    return done;
+  }
+  function chime() {
+    const ac = ensureAudio(); if (!ac) return;
+    const o = ac.createOscillator(), g = ac.createGain(), t = ac.currentTime;
+    o.type = "sine"; o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(1320, t + 0.12);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.26);
+  }
+  function renderWake() {
+    $("wake").classList.toggle("on", wakeOn());
+    $("wake").title = wakeOn() ? 'Listening for "Jo" (click to turn off)' : 'Say "Jo" to talk (click to turn on)';
+    if (reactor.classList.contains("idle")) setState("idle");
+  }
+
+  // ---------- full screen ----------
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.().catch(() => toast("This browser can't go full screen here. Press F11 instead."));
+  }
+  function renderFullscreen() {
+    const full = !!document.fullscreenElement;
+    $("fullscreen").title = full ? "Exit full screen (F)" : "Full screen (F)";
+    $("fullscreen").innerHTML = full
+      ? '<svg viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5zm3-8H5v2h5V5H8zm6 11h2v-3h3v-2h-5zm2-11V5h-2v5h5V8z"/></svg>'
+      : '<svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z"/></svg>';
   }
 
   // ---------- asking Jo ----------
@@ -560,6 +644,7 @@
     settings.tamil = tamil; saveSettings(); agent = null;
     $("lang-en").classList.toggle("on", !tamil); $("lang-ta").classList.toggle("on", tamil);
     document.documentElement.lang = tamil ? "ta" : "en";
+    if (wakeRec) stopWake().then(() => scheduleWake()); // re-listen in the new language
   }
   function renderMute() {
     $("mute").innerHTML = settings.speak
@@ -573,6 +658,7 @@
   document.addEventListener("keydown", (e) => {
     const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
     if (e.code === "Space" && !typing && $("settings").hidden) { e.preventDefault(); listen(); }
+    if (e.key.toLowerCase() === "f" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && $("settings").hidden) toggleFullscreen();
     if (e.key === "Escape") { if (!$("settings").hidden) closeSettings(); else { stopSpeaking(); setState("idle"); } }
   });
   $("quick").addEventListener("click", (e) => {
@@ -585,6 +671,13 @@
   $("lang-ta").addEventListener("click", () => setLang(true));
   $("mute").addEventListener("click", () => { settings.speak = !settings.speak; saveSettings(); renderMute(); if (!settings.speak) { stopSpeaking(); setState("idle"); } });
   $("open-settings").addEventListener("click", openSettings);
+  $("fullscreen").addEventListener("click", toggleFullscreen);
+  document.addEventListener("fullscreenchange", renderFullscreen);
+  $("wake").addEventListener("click", () => {
+    if (!Recognition) { toast('The "Jo" wake word needs Chrome or Edge.'); return; }
+    settings.wakeWord = !settings.wakeWord; saveSettings(); renderWake();
+    if (!settings.wakeWord) stopWake();
+  });
   $("close-settings").addEventListener("click", closeSettings);
   $("drawer-backdrop").addEventListener("click", closeSettings);
   $("save-settings").addEventListener("click", () => {
@@ -672,7 +765,7 @@
   });
 
   // ---------- start ----------
-  setLang(settings.tamil); renderMute(); renderSystems(); renderTasks(); tickClock(); setState("idle");
+  setLang(settings.tamil); renderMute(); renderWake(); renderFullscreen(); renderSystems(); renderTasks(); tickClock(); setState("idle");
   addMsg("jo", settings.geminiKey
     ? (settings.tamil ? "வணக்கம் கார்த்திக். நான் தயார்." : "Good to see you, Karthik. All systems ready. What do you need?")
     : "Welcome, Karthik. Open Settings (the gear, top right) and add your free Gemini key to bring me online.");

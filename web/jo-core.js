@@ -606,7 +606,16 @@
     }
   }
 
-  const api = { GoogleWorkspace, DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  // Wake word: "Jo" (speech engines also write it as Joe / Jho / Joh, or ஜோ in Tamil).
+  // Returns null when Jo wasn't called, else { command } with whatever was said after the name.
+  const WAKE_RE = /(?:^|[^\p{L}])(?:(?:hey|hi|hello|ok|okay|ஹே|ஹாய்)[\s,]+)?(jo|joe|jho|joh|ஜோ)(?=$|[^\p{L}])[\s,.!?:;-]*/iu;
+  function matchWake(text) {
+    const m = WAKE_RE.exec(String(text || ""));
+    if (!m) return null;
+    return { command: String(text).slice(m.index + m[0].length).trim() };
+  }
+
+  const api = { matchWake, GoogleWorkspace, DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);

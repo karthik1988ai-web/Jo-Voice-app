@@ -134,6 +134,16 @@ Notes:
 
 Short alerts (new-mail and reminder announcements) always use the PC voice, so they don't use up the Gemini voice limit.
 
+## Talk to Jo: say "Jo"
+
+Jo listens for its name while it's idle (the ear button at the top glows while it listens). Say **"Jo"** and wait for the chime, then speak; or say it all at once: **"Jo, check my mail"**. "Hey Jo" works too, and in Tamil mode say **"ஜோ"**.
+- The first time, Chrome or Edge asks to use the microphone: click **Allow**.
+- Jo stops listening while it thinks or speaks, so it never hears itself.
+- Click the ear button to turn the wake word off or on. The mic button, Space key, or clicking the core still work.
+- Keep the Jo tab open (it can sit behind other windows). Chrome's speech recognition uses Google's servers, so it needs internet.
+
+**Full screen:** click the ⛶ button at the top, or press **F**. Press **F** or **Esc** to leave.
+
 ## 5. Morning brief and reminders
 
 - Jo makes the brief at the set time if it's open, or the first time you open it after that time. A notification lets you play it.

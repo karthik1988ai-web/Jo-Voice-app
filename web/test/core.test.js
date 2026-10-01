@@ -221,3 +221,14 @@ test("TaskStore ordering, done and delete", () => {
   assert.ok(s.remove(a.id)); assert.equal(s.all().length, 1);
   assert.throws(() => Jo.parseLocal("tomorrow"), /Bad date/);
 });
+
+test("matchWake finds Jo and keeps the command after the name", () => {
+  assert.deepEqual(Jo.matchWake("Jo"), { command: "" });
+  assert.deepEqual(Jo.matchWake("hey Joe, check my mail"), { command: "check my mail" });
+  assert.deepEqual(Jo.matchWake("okay jo what's on today"), { command: "what's on today" });
+  assert.deepEqual(Jo.matchWake("ஜோ இன்றைய வேலைகள்"), { command: "இன்றைய வேலைகள்" });
+  assert.equal(Jo.matchWake("I need a job done"), null);
+  assert.equal(Jo.matchWake("Joseph called"), null);
+  assert.equal(Jo.matchWake("major update"), null);
+  assert.equal(Jo.matchWake(""), null);
+});
