@@ -6,6 +6,7 @@ Jo is a "Jarvis"-style assistant with a holographic HUD. Talk to it (or type) in
 - **"How many Kavery orders today? Any pending deliveries?"**: reads the **Kavery Delivery** Supabase database
 - **"What are today's Thirumal sales? Who owes us money?"**: reads the **Thirumal accounts** Supabase database
 - **"What's on my calendar this week?"**: your **Google Calendar**
+- **"What's the weather in Chennai?"**, **"Today's news"**, **"Gold rate today?"**: searches the **web** live (Gemini's Google Search; free tier allows a daily number of searches)
 - **"Remind me to call the supplier at 5 PM"**, **"Add a meeting with the Britannia rep tomorrow at 11"**: Jo's own **tasks and agenda**, with reminders
 
 Every morning (8:00 AM by default) Jo writes a **morning brief** covering calendar, tasks, Kavery, Thirumal and important mail.

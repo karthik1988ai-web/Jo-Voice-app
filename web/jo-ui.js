@@ -56,7 +56,12 @@
   }
   function getAgent() {
     if (!settings.geminiKey) return null;
-    if (!agent) agent = new Agent(new Gemini(settings.geminiKey, settings.geminiModel), buildTools(), settings.tamil);
+    if (!agent) {
+      const gemini = new Gemini(settings.geminiKey, settings.geminiModel);
+      const tools = buildTools();
+      tools.search = gemini; // web search uses the same Gemini key
+      agent = new Agent(gemini, tools, settings.tamil);
+    }
     return agent;
   }
 
@@ -66,7 +71,7 @@
     get_unread_mail: "CHECKING MAIL", search_mail: "SEARCHING MAIL", read_mail: "READING MAIL",
     get_app_summary: "QUERYING BUSINESS DATA", search_app_records: "SEARCHING RECORDS", describe_app_tables: "SCANNING DATABASE", query_app_data: "QUERYING DATABASE",
     list_tasks: "CHECKING TASKS", add_task: "ADDING TASK", complete_task: "UPDATING TASK", delete_task: "UPDATING TASK",
-    list_events: "CHECKING AGENDA", add_event: "ADDING TO AGENDA",
+    list_events: "CHECKING AGENDA", add_event: "ADDING TO AGENDA", web_search: "SEARCHING THE WEB",
   };
   function setState(mode, label) {
     window.JoGraph?.setActivity(mode);
