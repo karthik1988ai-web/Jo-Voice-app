@@ -232,3 +232,32 @@ test("matchWake finds Jo and keeps the command after the name", () => {
   assert.equal(Jo.matchWake("major update"), null);
   assert.equal(Jo.matchWake(""), null);
 });
+
+test("web_search asks Gemini with Google Search grounding and returns the answer with sources", async () => {
+  const sent = [];
+  const replies = [
+    // Jo decides to search
+    { candidates: [{ content: { role: "model", parts: [{ functionCall: { name: "web_search", args: { query: "Chennai weather today" } } }] } }] },
+    // the grounded search call
+    { candidates: [{ content: { role: "model", parts: [{ text: "Chennai: 33°C, light rain in the evening." }] },
+      groundingMetadata: { groundingChunks: [
+        { web: { uri: "https://vertexaisearch.example/1", title: "imd.gov.in" } },
+        { web: { uri: "https://vertexaisearch.example/2", title: "imd.gov.in" } },
+        { web: { uri: "https://vertexaisearch.example/3", title: "thehindu.com" } },
+      ] } }] },
+    // Jo's spoken reply
+    { candidates: [{ content: { role: "model", parts: [{ text: "It's 33 degrees in Chennai, with light rain this evening, says IMD." }] } }] },
+  ];
+  const http = async (url, init) => { sent.push(JSON.parse(init.body)); return json(replies.shift()); };
+  const gemini = new Jo.Gemini("KEY", "gemini-flash-latest", http);
+  const agent = new Jo.Agent(gemini, new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()), search: gemini }));
+  const used = [];
+  assert.match(await agent.ask("weather in Chennai?", (t) => used.push(t)), /33 degrees/);
+  assert.deepEqual(used, ["web_search"]);
+  assert.deepEqual(sent[1].tools, [{ google_search: {} }]);
+  assert.match(sent[1].contents[0].parts[0].text, /Question: Chennai weather today/);
+  const result = sent[2].contents.at(-1).parts[0].functionResponse.response.result;
+  assert.equal(result, "Chennai: 33°C, light rain in the evening.\nSources: imd.gov.in, thehindu.com");
+  // Without a search engine Jo says what's missing instead of failing.
+  assert.match(await new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()) }).call("web_search", { query: "x" }), /Gemini key/);
+});
