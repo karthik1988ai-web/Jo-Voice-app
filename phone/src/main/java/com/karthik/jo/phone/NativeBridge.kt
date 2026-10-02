@@ -48,7 +48,10 @@ class NativeBridge(private val context: Context, private val host: Host) : WebVi
         reply = replyProxy
         val m = try { JSONObject(message.data ?: return) } catch (e: Exception) { return }
         when (m.optString("t")) {
-            "hello" -> { ensureTts(); askNotificationPermission() }
+            "hello" -> {
+                ensureTts(); askNotificationPermission()
+                if (listenPending) { listenPending = false; send(JSONObject().put("t", "listen")) }
+            }
             "rec.start" -> recStart(Session(m.getString("id"), m.optString("lang"), m.optBoolean("continuous"), m.optBoolean("interim")))
             "rec.stop" -> recStop(m.getString("id"))
             "rec.abort" -> recAbort(m.getString("id"))
@@ -58,6 +61,13 @@ class NativeBridge(private val context: Context, private val host: Host) : WebVi
             "notify.permission" -> askNotificationPermission()
             "fullscreen" -> { host.setFullscreen(m.optBoolean("on")); send(JSONObject().put("t", "fullscreen").put("on", m.optBoolean("on"))) }
         }
+    }
+
+    /** Ask the page to start listening (Jo opened by the assistant gesture or shortcut). */
+    private var listenPending = false
+    fun requestListen() {
+        if (reply == null) listenPending = true // page still loading: tell it once it says hello
+        else send(JSONObject().put("t", "listen"))
     }
 
     private fun send(m: JSONObject) {

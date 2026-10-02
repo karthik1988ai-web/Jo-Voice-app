@@ -114,8 +114,12 @@
   function addMsg(who, text, opts = {}) {
     const div = document.createElement("div");
     div.className = `msg ${who}${opts.error ? " err" : ""}`;
+    const meta = [
+      opts.tools?.length ? `checked: ${[...new Set(opts.tools)].map((t) => t.replace(/_/g, " ")).join(", ")}` : "",
+      opts.secs ? `${opts.secs.toFixed(1)} s` : "",
+    ].filter(Boolean).join(" · ");
     div.innerHTML = `<div><div class="who">${who === "me" ? "YOU" : "JO"}</div><div class="bubble${settings.tamil ? " ta" : ""}">${esc(text)}</div>${
-      opts.tools?.length ? `<div class="tools">checked: ${esc([...new Set(opts.tools)].map((t) => t.replace(/_/g, " ")).join(", "))}</div>` : ""}</div>`;
+      meta ? `<div class="tools">${esc(meta)}</div>` : ""}</div>`;
     transcript.appendChild(div);
     transcript.scrollTop = transcript.scrollHeight;
   }
@@ -129,7 +133,10 @@
   const loadVoices = () => { voices = speechSynthesis.getVoices(); if (!$("settings").hidden) fillVoiceSelects(); };
   if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
-  let audioCtx = null, currentSource = null, speakSeq = 0, warnedGeminiVoice = false;
+  // Gemini voice audio arrives in pieces; each is scheduled right after the previous one.
+  let audioCtx = null, speakSeq = 0, warnedGeminiVoice = false;
+  const sources = new Set();
+  let streaming = false, nextAt = 0;
   function ensureAudio() {
     if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx?.state === "suspended") audioCtx.resume();
@@ -141,9 +148,11 @@
   function stopSpeaking() {
     speakSeq++;
     if ("speechSynthesis" in window) speechSynthesis.cancel();
-    if (currentSource) { try { currentSource.stop(); } catch { /* already stopped */ } currentSource = null; }
+    streaming = false;
+    sources.forEach((src) => { try { src.stop(); } catch { /* already stopped */ } });
+    sources.clear();
   }
-  const isSpeaking = () => !!currentSource || ("speechSynthesis" in window && speechSynthesis.speaking);
+  const isSpeaking = () => streaming || sources.size > 0 || ("speechSynthesis" in window && speechSynthesis.speaking);
 
   function pcVoice(lang, name) {
     const re = lang === "ta" ? /^ta/i : /^en/i;
@@ -174,15 +183,20 @@
     const view = new DataView(bytes.buffer);
     const samples = new Float32Array(Math.floor(bytes.length / 2));
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+    if (!samples.length) return;
     const buffer = ctx.createBuffer(1, samples.length, rate);
     buffer.copyToChannel(samples, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
     src.connect(ctx.destination);
-    src.onended = () => { if (currentSource === src) { currentSource = null; if (seq === speakSeq) setState("idle"); } };
-    currentSource = src;
-    setState("speaking");
-    src.start();
+    src.onended = () => {
+      sources.delete(src);
+      if (seq === speakSeq && !streaming && !sources.size) setState("idle");
+    };
+    sources.add(src);
+    const at = Math.max(ctx.currentTime + 0.03, nextAt);
+    src.start(at);
+    nextAt = at + buffer.duration;
   }
 
   /**
@@ -200,12 +214,26 @@
       try {
         setState("thinking", "PREPARING VOICE");
         const style = lang === "ta" ? "" : "Say in a calm, clear, friendly voice with a light Indian English accent:";
-        const audio = await new Gemini(settings.geminiKey, settings.geminiModel).speech(text, voice, settings.ttsModel || DEFAULT_TTS_MODEL, style);
-        if (seq !== speakSeq) return; // something newer started meanwhile
-        playPcm(audio, seq);
+        // Stream: Jo starts talking as soon as the first piece of audio arrives.
+        streaming = true; nextAt = 0;
+        let started = false;
+        try {
+          await new Gemini(settings.geminiKey, settings.geminiModel).speech(text, voice, settings.ttsModel || DEFAULT_TTS_MODEL, style, (piece) => {
+            if (seq !== speakSeq) return; // something newer started meanwhile
+            if (!started) { started = true; setState("speaking"); }
+            playPcm(piece, seq);
+          });
+        } catch (e) {
+          if (started) e.partial = true; // some audio already played: don't repeat it in the PC voice
+          throw e;
+        } finally {
+          if (seq === speakSeq) streaming = false;
+        }
+        if (seq === speakSeq && !sources.size) setState("idle");
         return;
       } catch (e) {
         if (seq !== speakSeq) return;
+        if (e.partial) { if (!sources.size) setState("idle"); return; }
         if (!warnedGeminiVoice || opts.voice) toast(`${e.message} Using the ${DEVICE} voice instead.`);
         warnedGeminiVoice = true;
       }
@@ -371,10 +399,10 @@
     if (!a) { addMsg("jo", "Please add your Gemini API key in Settings first.", { error: true }); openSettings(); return; }
     busy = true;
     setState("thinking");
-    const used = [];
+    const used = [], t0 = performance.now();
     try {
       const reply = await a.ask(text, (tool) => { used.push(tool); setState("thinking", TOOL_LABELS[tool] || "PROCESSING…"); });
-      addMsg("jo", reply, { tools: used });
+      addMsg("jo", reply, { tools: used, secs: (performance.now() - t0) / 1000 });
       renderTasks(); renderAgenda();
       speak(reply);
     } catch (e) {
@@ -791,6 +819,9 @@
 
   // ---------- start ----------
   if (inApp) $("voice-engine").querySelector('option[value="browser"]').textContent = "Phone voice (instant, offline)";
+  // On the phone, an always-open mic shows Android's mic icon and beeps, so the "Jo" wake word starts
+  // off there: Jo listens when opened by the assistant gesture, the "Talk to Jo" shortcut, or a tap.
+  if (inApp && !settings.appWakeChosen) { settings.wakeWord = false; settings.appWakeChosen = true; saveSettings(); }
   setLang(settings.tamil); renderMute(); renderWake(); renderFullscreen(); renderSystems(); renderTasks(); tickClock(); setState("idle");
   addMsg("jo", settings.geminiKey
     ? (settings.tamil ? "வணக்கம் கார்த்திக். நான் தயார்." : "Good to see you, Karthik. All systems ready. What do you need?")
@@ -803,6 +834,10 @@
   setInterval(renderTasks, 5 * 60000); // picks up tasks added in Google Tasks elsewhere
   checkReminders(); checkBrief();
   checkMail(); scheduleMail();
+  // The Android app asks for this when Jo is opened by the assistant gesture or "Talk to Jo".
+  const listenOnRequest = () => { if (!window.JoListenRequested) return; window.JoListenRequested = false; if (!rec) listen(); };
+  addEventListener("jo-listen", listenOnRequest);
+  listenOnRequest();
   finishGoogleSignIn().then(syncGoogleStatus);
   // Google may have been connected from another device (the bridge keeps the login): pick it up.
   async function syncGoogleStatus() {

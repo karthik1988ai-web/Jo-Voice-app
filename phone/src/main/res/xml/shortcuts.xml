@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the Jo icon (or drag this to the home screen): opens Jo already listening. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="talk"
+        android:enabled="true"
+        android:icon="@drawable/ic_jo"
+        android:shortcutShortLabel="@string/talk_short"
+        android:shortcutLongLabel="@string/talk_long">
+        <intent
+            android:action="com.karthik.jo.LISTEN"
+            android:targetPackage="com.karthik.jo"
+            android:targetClass="com.karthik.jo.phone.MainActivity" />
+    </shortcut>
+</shortcuts>
