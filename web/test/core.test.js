@@ -261,3 +261,64 @@ test("web_search asks Gemini with Google Search grounding and returns the answer
   // Without a search engine Jo says what's missing instead of failing.
   assert.match(await new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()) }).call("web_search", { query: "x" }), /Gemini key/);
 });
+
+test("Gemini asks for low thinking, and drops it for models that reject it", async () => {
+  const sent = [];
+  const http = async (url, init) => {
+    const body = JSON.parse(init.body); sent.push({ model: url.split("/models/")[1].split(":")[0], think: body.generationConfig?.thinkingConfig });
+    if (body.generationConfig?.thinkingConfig && /2\.5/.test(url)) return json({ error: { message: "Thinking level is not supported for this model." } }, 400);
+    return json({ candidates: [{ content: { parts: [{ text: "ok" }] } }] });
+  };
+  const g = new Jo.Gemini("k", "gemini-flash-latest", http);
+  assert.equal(Jo.Gemini.text(await g.generate("s", [Jo.Gemini.userText("hi")])), "ok");
+  assert.deepEqual(sent[0].think, { thinkingLevel: "low" });
+  const old = new Jo.Gemini("k", "gemini-2.5-flash", http);
+  await old.generate("s", [Jo.Gemini.userText("hi")]);
+  await old.generate("s", [Jo.Gemini.userText("again")]);
+  assert.deepEqual(sent.slice(1).map((x) => !!x.think), [true, false, false]); // rejected once, then remembered
+});
+
+test("web search moves on to models whose free tier includes Google Search", async () => {
+  const tried = [];
+  const http = async (url) => {
+    const model = url.split("/models/")[1].split(":")[0]; tried.push(model);
+    if (model === "gemini-flash-latest") return json({ error: { message: "Search grounding is not supported on the free tier." } }, 400);
+    if (model === "gemini-2.5-flash") return json({ error: { message: "quota" } }, 429);
+    return json({ candidates: [{ content: { parts: [{ text: "Sensex closed at 85,000." }] } }] });
+  };
+  const g = new Jo.Gemini("k", "gemini-flash-latest", http);
+  const r = await g.webSearch("sensex today");
+  assert.equal(r.text, "Sensex closed at 85,000.");
+  assert.deepEqual(tried, ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]);
+  const none = new Jo.Gemini("k", "gemini-flash-latest", async () => json({ error: { message: "Search not available" } }, 400));
+  await assert.rejects(none.webSearch("x"), /Search not available/);
+});
+
+test("asking to search goes straight to web_search; searching mail does not", async () => {
+  const configs = [];
+  const http = async (url, init) => {
+    configs.push(JSON.parse(init.body).toolConfig || null);
+    return json({ candidates: [{ content: { parts: [{ text: "done" }] } }] });
+  };
+  const gemini = new Jo.Gemini("k", "m", http);
+  const agent = new Jo.Agent(gemini, new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()), search: gemini }));
+  await agent.ask("search google for the best biryani in Coimbatore");
+  assert.deepEqual(configs[0], { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["web_search"] } });
+  await agent.ask("search my mail for the Britannia invoice");
+  assert.equal(configs[1], null);
+});
+
+test("Gemini speech can stream audio pieces as they arrive", async () => {
+  let url;
+  const sse = [
+    'data: {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":"AAAA"}}]}}]}',
+    "",
+    'data: {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"audio/L16;codec=pcm;rate=24000","data":"BBBB"}}]}}]}',
+    "",
+  ].join("\n");
+  const http = async (u) => { url = u; return new Response(sse, { status: 200 }); };
+  const chunks = [];
+  await new Jo.Gemini("k", "m", http).speech("hello", "Kore", undefined, "", (c) => chunks.push(c));
+  assert.match(url, /:streamGenerateContent\?alt=sse$/);
+  assert.deepEqual(chunks, [{ data: "AAAA", rate: 24000 }, { data: "BBBB", rate: 24000 }]);
+});

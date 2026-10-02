@@ -125,5 +125,8 @@
   document.exitFullscreen = function () { send({ t: "fullscreen", on: false }); return Promise.resolve(); };
   handlers["fullscreen"] = (m) => { full = !!m.on; document.dispatchEvent(new Event("fullscreenchange")); };
 
+  // ---------- opened by the assistant gesture or "Talk to Jo" shortcut ----------
+  handlers["listen"] = () => { window.JoListenRequested = true; window.dispatchEvent(new Event("jo-listen")); };
+
   send({ t: "hello" });
 })();

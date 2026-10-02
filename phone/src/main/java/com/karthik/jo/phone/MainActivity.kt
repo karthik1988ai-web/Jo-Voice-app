@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity(), NativeBridge.Host {
         }
 
         bridge = NativeBridge(this, this)
+        if (wantsListen(intent)) bridge.requestListen()
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             web.loadDataWithBaseURL(null, page("Please update <b>Android System WebView</b> from the Play Store, then open Jo again."), "text/html", "utf-8", null)
             return
@@ -108,6 +109,15 @@ class MainActivity : ComponentActivity(), NativeBridge.Host {
 
         web.loadUrl(JoUrls.HOME)
     }
+
+    // Opened by the assistant gesture or the "Talk to Jo" shortcut: start listening straight away.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (wantsListen(intent)) bridge.requestListen()
+    }
+
+    private fun wantsListen(i: Intent?) = i?.action in setOf(Intent.ACTION_ASSIST, Intent.ACTION_VOICE_COMMAND, ACTION_LISTEN)
 
     override fun onResume() {
         super.onResume()
@@ -164,5 +174,6 @@ class MainActivity : ComponentActivity(), NativeBridge.Host {
 
     companion object {
         private val BG = Color.parseColor("#030A16")
+        const val ACTION_LISTEN = "com.karthik.jo.LISTEN"
     }
 }

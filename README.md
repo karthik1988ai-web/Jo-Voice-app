@@ -6,7 +6,7 @@ Jo is a "Jarvis"-style assistant with a holographic HUD. Talk to it (or type) in
 - **"How many Kavery orders today? Any pending deliveries?"**: reads the **Kavery Delivery** Supabase database
 - **"What are today's Thirumal sales? Who owes us money?"**: reads the **Thirumal accounts** Supabase database
 - **"What's on my calendar this week?"**: your **Google Calendar**
-- **"What's the weather in Chennai?"**, **"Today's news"**, **"Gold rate today?"**: searches the **web** live (Gemini's Google Search; free tier allows a daily number of searches)
+- **"What's the weather in Chennai?"**, **"Today's news"**, **"Search the gold rate today"**: searches the **web** live (Gemini's Google Search; if your model has no free search, Jo uses Gemini 2.5 Flash, whose free tier includes 500 searches a day)
 - **"Remind me to call the supplier at 5 PM"**, **"Add a meeting with the Britannia rep tomorrow at 11"**: Jo's own **tasks and agenda**, with reminders
 
 Every morning (8:00 AM by default) Jo writes a **morning brief** covering calendar, tasks, Kavery, Thirumal and important mail.
@@ -188,7 +188,11 @@ GitHub repo → **Settings → Secrets and variables → Actions → New reposit
 
 ### A3. Phone tips
 
-- **Say "Jo"** while Jo is on screen. Android doesn't let apps listen in the background, so the wake word pauses when you leave Jo and resumes when you come back. The mic button always works.
+- **Open Jo listening, without an always-on mic:**
+  - **Assistant gesture:** phone Settings → Apps → Default apps → **Digital assistant app** → choose **Jo**. Then long-press the power (or home) button: Jo opens and listens.
+  - **"Talk to Jo" shortcut:** long-press the Jo icon (drag it to the home screen to keep it there).
+  - Or tap the core or the mic button.
+- **Say "Jo" (optional):** on the phone the wake word is off, because hearing "Jo" means keeping the microphone open (Android then shows its mic icon and may beep). Tap the ear button to turn it on; it works while Jo is on screen.
 - **Back** closes Settings; on the main screen it sends Jo to the background (still running, so mail alerts and reminders keep coming while the phone keeps it alive).
 - **Full screen:** the ⛶ button hides the status and navigation bars.
 - **Tamil phone voice:** Settings → System → Languages → Text-to-speech → Google engine → Install voice data → **Tamil**. Or keep the **Gemini AI voice**, which already speaks Tamil.
