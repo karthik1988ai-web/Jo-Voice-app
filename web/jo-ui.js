@@ -1,7 +1,7 @@
 /* Jo UI: wires the HUD to JoCore (voice, panels, settings, brief and reminders). */
 (function () {
   "use strict";
-  const { matchWake, Gemini, Supabase, Bridge, BridgeApp, GoogleWorkspace, TaskStore, Tools, Agent, DEFAULT_MODEL, DEFAULT_TTS_MODEL, GEMINI_VOICES, formatTime, isoDate, startOfToday } = window.JoCore;
+  const { extractFigures, matchWake, Gemini, Supabase, Bridge, BridgeApp, GoogleWorkspace, TaskStore, Tools, Agent, DEFAULT_MODEL, DEFAULT_TTS_MODEL, GEMINI_VOICES, formatTime, isoDate, startOfToday } = window.JoCore;
   const formatAgo = (ms) => {
     const min = Math.round((Date.now() - ms) / 60000);
     if (min < 1) return "just now";
@@ -81,6 +81,7 @@
       voiceTimer = null;
     }
     window.JoGraph?.setActivity(mode);
+    window.JoViz?.setMode(mode);
     reactor.className = `reactor ${mode}`;
     stateEl.className = `state ${mode}`;
     stateEl.textContent = label || {
@@ -90,30 +91,6 @@
     if (mode === "idle") scheduleWake(); else stopWake();
   }
 
-  // Audio-style bars around the core (animated while speaking/listening)
-  const bars = [];
-  (function makeBars() {
-    const g = $("bars"), ns = "http://www.w3.org/2000/svg";
-    for (let i = 0; i < 64; i++) {
-      const a = (i / 64) * Math.PI * 2, l = document.createElementNS(ns, "line");
-      l.dataset.a = a;
-      g.appendChild(l);
-      bars.push(l);
-    }
-    const draw = (t) => {
-      const mode = reactor.classList.contains("speaking") ? 2 : reactor.classList.contains("listening") ? 1 : reactor.classList.contains("thinking") ? 0.6 : 0.15;
-      bars.forEach((l, i) => {
-        const a = +l.dataset.a;
-        const wave = (Math.sin(t / 180 + i * 0.7) + Math.sin(t / 97 + i * 1.3) + 2) / 4;
-        const len = 4 + wave * 16 * mode;
-        const r1 = 104, r2 = r1 + len;
-        l.setAttribute("x1", 200 + Math.cos(a) * r1); l.setAttribute("y1", 200 + Math.sin(a) * r1);
-        l.setAttribute("x2", 200 + Math.cos(a) * r2); l.setAttribute("y2", 200 + Math.sin(a) * r2);
-      });
-      requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
-  })();
 
   // ---------- transcript ----------
   const transcript = $("transcript");
@@ -141,11 +118,18 @@
   if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
 
   // Gemini voice audio arrives in pieces; each is scheduled right after the previous one.
-  let audioCtx = null, speakSeq = 0, warnedGeminiVoice = false;
+  let audioCtx = null, analyser = null, speakSeq = 0, warnedGeminiVoice = false;
   const sources = new Set();
   let streaming = false, nextAt = 0;
   function ensureAudio() {
-    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // The visualizer listens to Jo's Gemini voice through this analyser.
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.connect(audioCtx.destination);
+      window.JoViz?.setAnalyser(analyser);
+    }
     if (audioCtx?.state === "suspended") audioCtx.resume();
     return audioCtx;
   }
@@ -179,6 +163,7 @@
       : "No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
     u.rate = 1.02;
     u.onstart = () => { if (seq === speakSeq) setState("speaking"); };
+    u.onboundary = (e) => { if (seq === speakSeq && e.name !== "sentence") window.JoViz?.wordAt(e.charIndex); };
     u.onend = u.onerror = () => { if (seq === speakSeq) setState("idle"); };
     speechSynthesis.speak(u);
   }
@@ -195,7 +180,7 @@
     buffer.copyToChannel(samples, 0);
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(ctx.destination);
+    src.connect(analyser || ctx.destination);
     src.onended = () => {
       sources.delete(src);
       if (seq === speakSeq && !streaming && !sources.size) setState("idle");
@@ -414,6 +399,8 @@
     try {
       const reply = await a.ask(text, (tool) => { used.push(tool); setState("thinking", TOOL_LABELS[tool] || "PROCESSING…"); });
       addMsg("jo", reply, { tools: used, stats: a.lastStats || { think: (performance.now() - t0) / 1000, data: 0 } });
+      showOnStage(reply);
+      $("hud-latency").textContent = `${((performance.now() - t0) / 1000).toFixed(1)} s`;
       voiceTimer = { t: performance.now(), el: transcript.lastElementChild?.querySelector(".tools") };
       renderTasks(); renderAgenda();
       speak(reply);
@@ -433,7 +420,7 @@
       const text = await a.morningBrief();
       storage.setItem("jo.brief", JSON.stringify({ date: isoDate(), text, played: false }));
       addMsg("jo", text);
-      if (!auto || navigator.userActivation?.hasBeenActive) { speak(text, { natural: true }); markBriefPlayed(); }
+      if (!auto || navigator.userActivation?.hasBeenActive) { showOnStage(text); speak(text, { natural: true }); markBriefPlayed(); }
       else { $("brief-banner").hidden = false; setState("idle"); notify("Your morning brief is ready", "Click to listen", () => { window.focus(); playBrief(); }); }
     } catch (e) {
       addMsg("jo", `Morning brief failed: ${e.message}`, { error: true });
@@ -441,7 +428,11 @@
     } finally { busy = false; }
   }
   const markBriefPlayed = () => { const b = readJson("jo.brief", null); if (b) { b.played = true; storage.setItem("jo.brief", JSON.stringify(b)); } $("brief-banner").hidden = true; };
-  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) speak(b.text, { force: true, natural: true }); markBriefPlayed(); }
+  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) { showOnStage(b.text); speak(b.text, { force: true, natural: true }); } markBriefPlayed(); }
+  /** Captions and key figures in the centre while Jo speaks. */
+  function showOnStage(text) {
+    window.JoViz?.say(text, settings.tamil ? "ta" : "en", extractFigures(text));
+  }
 
   // ---------- panels ----------
   function renderSystems() {
@@ -450,7 +441,9 @@
       kavery: !!buildTools().kavery, thirumal: !!buildTools().thirumal,
       gtasks: !!buildTools().google,
     };
-    const rows = [["gemini", "Gemini AI core"], ["mail", "Zoho Mail"], ["kavery", "Kavery Delivery"], ["thirumal", "Thirumal accounts"], ["calendar", "Google Calendar"], ["gtasks", "Google Tasks"]];
+    const rows = [["gemini", "Gemini"], ["mail", "Zoho Mail"], ["kavery", "Kavery"], ["thirumal", "Thirumal"], ["calendar", "Calendar"], ["gtasks", "Google Tasks"]];
+    $("hud-model").textContent = !settings.geminiKey ? "Offline"
+      : settings.geminiModel === DEFAULT_MODEL ? "Gemini Flash-Lite" : settings.geminiModel.replace(/^gemini-/, "Gemini ");
     $("systems").innerHTML = rows.map(([k, label]) => {
       const st = !configured[k] ? "off" : health[k] === "err" ? "err" : "ok";
       const val = { off: "OFFLINE", err: "FAULT", ok: health[k] === "ok" ? "ONLINE" : "READY" }[st];
@@ -481,6 +474,7 @@
       if (t.source === "google" && !t.remindAt) return new Date(t.due).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
       return formatTime(t.due);
     };
+    $("hud-tasks").textContent = String(shownTasks.filter((t) => !t.done).length);
     $("tasks").innerHTML = shownTasks.length ? shownTasks.map((t) => `
       <li class="${t.done ? "done" : ""}" data-id="${esc(t.id)}" data-src="${t.source || "jo"}">
         <input type="checkbox" ${t.done ? "checked" : ""} aria-label="Done">
@@ -579,6 +573,7 @@
 
   function renderMail(mails, freshIds) {
     $("mail-count").textContent = mails.length ? `${mails.length}${mails.length >= 30 ? "+" : ""} UNREAD` : "";
+    $("hud-mail").textContent = `${mails.length}${mails.length >= 30 ? "+" : ""}`;
     $("mail").innerHTML = mails.length ? mails.slice(0, 6).map((m) => `
       <li class="${freshIds.has(m.messageId) ? "fresh" : ""}" data-from="${esc(m.from)}" data-subject="${esc(m.subject)}" title="Ask Jo to read this email">
         <div class="from">${esc(m.from)}</div>
@@ -749,6 +744,12 @@
   });
   document.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", () => runTest(b.dataset.test)));
   $("refresh-agenda").addEventListener("click", renderAgenda);
+  $("clear-convo").addEventListener("click", () => {
+    transcript.innerHTML = "";
+    agent?.reset();
+    window.JoViz?.clear();
+    addMsg("jo", settings.tamil ? "புதிய உரையாடல். சொல்லுங்கள்." : "New conversation. What do you need?");
+  });
   $("voice-engine").addEventListener("change", fillVoiceSelects);
   $("connect-google").addEventListener("click", connectGoogle);
   document.querySelectorAll("[data-preview]").forEach((b) => b.addEventListener("click", () => {

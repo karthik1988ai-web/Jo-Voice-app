@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&family=Noto+Sans+Tamil:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 <canvas id="particles" aria-hidden="true"></canvas>
@@ -37,70 +37,7 @@
 </header>
 
 <main class="hud">
-  <!-- Left: systems -->
-  <aside class="panel" id="systems-panel">
-    <h2 class="panel-title"><span>Systems</span></h2>
-    <ul class="systems" id="systems"></ul>
-
-    <h2 class="panel-title"><span>Quick commands</span></h2>
-    <div class="quick" id="quick">
-      <button data-brief>Morning brief</button>
-      <button data-ask="Any important unread mail?">Unread mail</button>
-      <button data-ask="How is Kavery Delivery doing today? Orders, deliveries and payments.">Kavery today</button>
-      <button data-ask="What are today's Thirumal sales and collections?">Thirumal sales</button>
-      <button data-ask="What's on my calendar today?">Today's agenda</button>
-      <button data-ask="What tasks are still open?">Open tasks</button>
-      <button data-ask="What are today's top news headlines in Tamil Nadu and India?">Today's news</button>
-    </div>
-  </aside>
-
-  <!-- Center: reactor + conversation -->
-  <section class="center">
-    <button id="reactor" class="reactor idle" aria-label="Talk to Jo (Space)">
-      <svg viewBox="0 0 400 400" aria-hidden="true">
-        <defs>
-          <radialGradient id="coreGlow">
-            <stop offset="0%" stop-color="#E9FDFF"/>
-            <stop offset="35%" stop-color="#7DF1FF"/>
-            <stop offset="70%" stop-color="rgba(62,230,255,.35)"/>
-            <stop offset="100%" stop-color="rgba(62,230,255,0)"/>
-          </radialGradient>
-          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        </defs>
-        <g class="ring r1"><circle cx="200" cy="200" r="190" pathLength="360" stroke-dasharray="1 5"/></g>
-        <g class="ring r2"><circle cx="200" cy="200" r="172" pathLength="360" stroke-dasharray="70 20 30 20"/></g>
-        <g class="ring r3"><circle cx="200" cy="200" r="154"/></g>
-        <g class="ring r4" filter="url(#glow)"><circle cx="200" cy="200" r="136" pathLength="360" stroke-dasharray="40 14 8 14"/></g>
-        <g id="bars" class="bars"></g>
-        <circle class="core-halo" cx="200" cy="200" r="96" fill="url(#coreGlow)"/>
-        <circle class="core-ring" cx="200" cy="200" r="62" filter="url(#glow)"/>
-        <text class="core-text" x="200" y="214" text-anchor="middle">JO</text>
-      </svg>
-    </button>
-    <div class="state" id="state">STANDING BY</div>
-
-    <div class="brief-banner" id="brief-banner" hidden>
-      <span>Morning brief ready</span>
-      <button id="play-brief">▶ Play</button>
-      <button id="dismiss-brief" aria-label="Dismiss">✕</button>
-    </div>
-
-    <div class="transcript" id="transcript" aria-live="polite"></div>
-
-    <form class="ask" id="ask-form" autocomplete="off">
-      <input id="ask-input" placeholder="Ask Jo anything…" aria-label="Ask Jo">
-      <button type="submit" class="send" aria-label="Send">
-        <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>
-      </button>
-      <button type="button" id="mic" class="mic" aria-label="Speak">
-        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
-      </button>
-    </form>
-  </section>
-
-  <!-- Right: today -->
+  <!-- Left: today -->
   <aside class="panel" id="today-panel">
     <div class="clock">
       <div id="clock-time">--:--</div>
@@ -121,6 +58,92 @@
     </form>
     <ul class="tasks" id="tasks"></ul>
   </aside>
+
+  <!-- Center: Jo's core and voice visualizer -->
+  <section class="stage" id="stage">
+    <div class="hud-read tl"><span class="k">Core</span><span class="v" id="hud-model">—</span></div>
+    <div class="hud-read tr"><span class="k">Last reply</span><span class="v" id="hud-latency">—</span></div>
+    <div class="hud-read bl"><span class="k">Unread mail</span><span class="v" id="hud-mail">—</span></div>
+    <div class="hud-read br"><span class="k">Open tasks</span><span class="v" id="hud-tasks">—</span></div>
+
+    <button id="reactor" class="reactor idle" aria-label="Talk to Jo (Space)">
+      <svg viewBox="0 0 400 400" aria-hidden="true">
+        <defs>
+          <radialGradient id="coreGlow">
+            <stop offset="0%" stop-color="#E9FDFF"/>
+            <stop offset="35%" stop-color="#7DF1FF"/>
+            <stop offset="70%" stop-color="rgba(62,230,255,.35)"/>
+            <stop offset="100%" stop-color="rgba(62,230,255,0)"/>
+          </radialGradient>
+          <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="rgba(62,230,255,0)"/>
+            <stop offset="100%" stop-color="rgba(62,230,255,.28)"/>
+          </linearGradient>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g class="ring r0"><circle cx="200" cy="200" r="198" pathLength="360" stroke-dasharray="0.6 4.4"/></g>
+        <g class="ring r1"><circle cx="200" cy="200" r="188" pathLength="360" stroke-dasharray="1 5"/></g>
+        <g class="ring r2"><circle cx="200" cy="200" r="172" pathLength="360" stroke-dasharray="70 20 30 20"/></g>
+        <g class="orbit o1"><circle cx="200" cy="12" r="3.5"/></g>
+        <g class="orbit o2"><circle cx="200" cy="28" r="2.5"/></g>
+        <g class="ring r3"><circle cx="200" cy="200" r="154"/></g>
+        <g class="sweep"><path d="M200 200 L200 46 A154 154 0 0 1 333.4 123 Z" fill="url(#sweepGrad)"/></g>
+        <g class="ring r4" filter="url(#glow)"><circle cx="200" cy="200" r="136" pathLength="360" stroke-dasharray="40 14 8 14"/></g>
+        <g class="ring r5"><circle cx="200" cy="200" r="122" pathLength="360" stroke-dasharray="2 2"/></g>
+        <g id="bars" class="bars"></g>
+        <circle class="core-halo" cx="200" cy="200" r="96" fill="url(#coreGlow)"/>
+        <circle class="core-ring" cx="200" cy="200" r="62" filter="url(#glow)"/>
+        <text class="core-text" x="200" y="214" text-anchor="middle">JO</text>
+      </svg>
+    </button>
+    <canvas id="wave" class="wave" aria-hidden="true"></canvas>
+    <div class="state" id="state">STANDING BY</div>
+    <div class="caption" id="caption" aria-hidden="true"></div>
+    <div class="figures" id="figures" aria-hidden="true"></div>
+
+    <div class="brief-banner" id="brief-banner" hidden>
+      <span>Morning brief ready</span>
+      <button id="play-brief">▶ Play</button>
+      <button id="dismiss-brief" aria-label="Dismiss">✕</button>
+    </div>
+  </section>
+
+  <!-- Right: conversation -->
+  <aside class="panel convo" id="convo-panel">
+    <h2 class="panel-title"><span>Conversation</span><button class="mini" id="clear-convo" title="Start a new conversation">⟲</button></h2>
+    <div class="transcript" id="transcript" aria-live="polite"></div>
+    <form class="ask" id="ask-form" autocomplete="off">
+      <input id="ask-input" placeholder="Ask Jo anything…" aria-label="Ask Jo">
+      <button type="submit" class="send" aria-label="Send">
+        <svg viewBox="0 0 24 24"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg>
+      </button>
+      <button type="button" id="mic" class="mic" aria-label="Speak">
+        <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+      </button>
+    </form>
+  </aside>
+
+  <!-- Bottom: systems and quick commands -->
+  <footer class="dock">
+    <div class="dock-group">
+      <span class="dock-label">Systems</span>
+      <ul class="systems" id="systems"></ul>
+    </div>
+    <div class="dock-group grow">
+      <span class="dock-label">Quick</span>
+      <div class="quick" id="quick">
+        <button data-brief>Morning brief</button>
+        <button data-ask="Any important unread mail?">Unread mail</button>
+        <button data-ask="How is Kavery Delivery doing today? Orders, deliveries and payments.">Kavery today</button>
+        <button data-ask="What are today's Thirumal sales and collections?">Thirumal sales</button>
+        <button data-ask="What's on my calendar today?">Today's agenda</button>
+        <button data-ask="What tasks are still open?">Open tasks</button>
+        <button data-ask="What are today's top news headlines in Tamil Nadu and India?">Today's news</button>
+      </div>
+    </div>
+  </footer>
 </main>
 
 <!-- Settings drawer -->
@@ -229,9 +252,10 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="jo-android.js?v=20"></script>
-<script src="jo-graph.js?v=20"></script>
-<script src="jo-core.js?v=20"></script>
-<script src="jo-ui.js?v=20"></script>
+<script src="jo-android.js?v=21"></script>
+<script src="jo-graph.js?v=21"></script>
+<script src="jo-viz.js?v=21"></script>
+<script src="jo-core.js?v=21"></script>
+<script src="jo-ui.js?v=21"></script>
 </body>
 </html>

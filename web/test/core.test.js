@@ -347,3 +347,16 @@ test("Agent records how long Gemini and the lookups took", async () => {
   assert.equal(typeof agent.lastStats.think, "number");
   assert.equal(typeof agent.lastStats.data, "number");
 });
+
+test("extractFigures finds amounts, percentages and counts for the HUD", () => {
+  assert.deepEqual(Jo.extractFigures("Kavery has 14 new orders today and 3 pending deliveries. Payments received are ₹45,200."), [
+    { value: "14", label: "NEW ORDERS" }, { value: "3", label: "PENDING DELIVERIES" }, { value: "₹45,200", label: "RECEIVED" },
+  ]);
+  assert.deepEqual(Jo.extractFigures("Thirumal sales were 1.2 lakh rupees, up 8% on yesterday."), [
+    { value: "₹1.2 lakh", label: "SALES" }, { value: "8%", label: "PERCENT" },
+  ]);
+  assert.deepEqual(Jo.extractFigures("Received ₹45,200, mostly cash."), [{ value: "₹45,200", label: "RECEIVED" }]);
+  assert.deepEqual(Jo.extractFigures("It's 33 degrees in Chennai."), [{ value: "33°C", label: "TEMPERATURE" }]);
+  assert.deepEqual(Jo.extractFigures("Your meeting is at 5 PM on 2 October 2026."), []);
+  assert.equal(Jo.extractFigures("1 order, 2 tasks, 3 emails, 4 meetings").length, 3);
+});

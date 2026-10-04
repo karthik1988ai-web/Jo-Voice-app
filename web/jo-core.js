@@ -745,7 +745,39 @@
     return { command: String(text).slice(m.index + m[0].length).trim() };
   }
 
-  const api = { matchWake, GoogleWorkspace, DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
+  /**
+   * Picks up to [max] key figures from a spoken reply for the HUD: rupee amounts, percentages,
+   * temperatures and counts like "14 orders". Returns [{ value, label }] in reading order.
+   */
+  const FIGURE_WORDS = "sales|collections?|outstanding|payments?|due|received|balance|revenue|expenses?|profit|price|rate|total|pending|paid|cash|gold|silver";
+  function extractFigures(text, max = 3) {
+    text = String(text || "");
+    const found = [];
+    const add = (index, value, label) => {
+      if (!found.some((f) => f.value === value)) found.push({ index, value, label: label.toUpperCase() });
+    };
+    // The money word just before an amount ("sales of ₹45,000") names it.
+    const moneyLabel = (index) => {
+      const before = text.slice(Math.max(0, index - 40), index).toLowerCase();
+      const words = before.match(new RegExp(`\\b(${FIGURE_WORDS})\\b`, "g"));
+      return words ? words[words.length - 1] : "amount";
+    };
+    const scale = (u) => (u ? ` ${u.replace(/s$/i, "").toLowerCase()}` : "");
+    let m;
+    const amount = /(?:₹|\brs\.?|\binr)\s?(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*(lakhs?|crores?|thousand)?/gi;
+    while ((m = amount.exec(text))) add(m.index, `₹${m[1]}${scale(m[2])}`, moneyLabel(m.index));
+    const rupees = /(\d(?:[\d,]*\d)?(?:\.\d+)?)\s*(lakhs?|crores?|thousand)?\s*rupees/gi;
+    while ((m = rupees.exec(text))) add(m.index, `₹${m[1]}${scale(m[2])}`, moneyLabel(m.index));
+    const pct = /(\d+(?:\.\d+)?)\s?(?:%|percent\b)/gi;
+    while ((m = pct.exec(text))) add(m.index, `${m[1]}%`, "percent");
+    const temp = /(\d+(?:\.\d+)?)\s?(?:°\s?c\b|degrees\b)/gi;
+    while ((m = temp.exec(text))) add(m.index, `${m[1]}°C`, "temperature");
+    const count = /\b(\d(?:[\d,]*\d)?)\s+((?:new|unread|pending|open|important|overdue)\s+)?(orders?|deliveries|delivery|invoices?|e-?mails?|mails?|messages?|tasks?|meetings?|payments?|customers?|events?|items?|bills?|reminders?)\b/gi;
+    while ((m = count.exec(text))) add(m.index, m[1], `${m[2] || ""}${m[3]}`);
+    return found.sort((a, b) => a.index - b.index).slice(0, max).map(({ value, label }) => ({ value, label }));
+  }
+
+  const api = { extractFigures, matchWake, GoogleWorkspace, DEFAULT_TTS_MODEL, GEMINI_VOICES, BridgeApp, describeMail, DEFAULT_MODEL, FALLBACK_MODEL, Gemini, Supabase, Bridge, TaskStore, Tools, Agent, parseLocal, formatTime, formatClock, isoDate, startOfToday, stripHtml };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.JoCore = api;
 })(typeof window !== "undefined" ? window : globalThis);
