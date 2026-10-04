@@ -135,6 +135,18 @@ a { color: var(--cyan); }
 @keyframes run { from { left: -18%; } to { left: 100%; } }
 .dock-group { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .dock-group.grow { flex: 1; }
+button.dock-label { background: none; border: 0; padding: 0; cursor: pointer; }
+button.dock-label:hover { color: var(--cyan); }
+/* Systems collapse to a row of status dots plus a summary; tap to see each name. */
+.sys-summary {
+  display: none; background: none; border: 0; padding: 0; cursor: pointer;
+  font-family: var(--head); font-size: 11px; letter-spacing: 2px; color: var(--green); white-space: nowrap;
+}
+.sys-summary.warn { color: var(--amber); }
+.sys.collapsed .sys-summary { display: inline; }
+.sys.collapsed .systems { gap: 6px; flex-wrap: nowrap; }
+.sys.collapsed .systems .name, .sys.collapsed .systems .val { display: none; }
+.sys.collapsed .systems li { cursor: help; }
 .dock-label { font-family: var(--head); font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--cyan-dim); writing-mode: vertical-rl; transform: rotate(180deg); }
 .systems { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .systems li { display: flex; align-items: center; gap: 7px; font-size: 14px; white-space: nowrap; }

@@ -149,52 +149,68 @@
     const re = lang === "ta" ? /^ta/i : /^en/i;
     const chosen = name && voices.find((v) => v.name === name);
     if (chosen) return chosen;
-    const pick = (r) => voices.find((v) => r.test(v.lang) && /natural|online|google/i.test(v.name)) || voices.find((v) => r.test(v.lang));
+    // Voices installed on the device first: online ones can fail silently.
+    const local = (v) => v.localService !== false && !/network|online/i.test(v.name);
+    const pick = (r) => voices.find((v) => r.test(v.lang) && local(v)) || voices.find((v) => r.test(v.lang));
     return lang === "ta" ? pick(re) : pick(/^en-IN/i) || pick(/^en-GB/i) || pick(re);
   }
-
-  function speakWithPc(text, lang, name, seq) {
-    if (!("speechSynthesis" in window)) { setState("idle"); return; }
-    const u = new SpeechSynthesisUtterance(text);
-    u.voice = pcVoice(lang, name) || null;
-    u.lang = u.voice?.lang || (lang === "ta" ? "ta-IN" : "en-IN");
-    if (lang === "ta" && !u.voice) toast(inApp
+  // Short pieces: long text in one go can stop partway in Chrome and on some phones.
+  function splitForSpeech(text) {
+    const parts = String(text).match(/[^.!?।\n]+[.!?।]*[\s\n]*/g) || [String(text)];
+    const out = [];
+    for (const p of parts) {
+      if (out.length && (out[out.length - 1] + p).length < 220) out[out.length - 1] += p;
+      else out.push(p);
+    }
+    return out.filter((p) => p.trim());
+  }
+  /**
+   * Speaks with the phone/PC voice. onFail(error) is called if it doesn't really start (so the
+   * Gemini voice can take over); otherwise problems just end the speech.
+   */
+  let liveUtterance = null; // held so the browser doesn't drop it (and its events) too early
+  function speakWithPc(text, lang, name, seq, onFail = null) {
+    const fail = (msg) => { if (onFail) onFail(new Error(msg)); else if (seq === speakSeq) setState("idle"); };
+    if (!("speechSynthesis" in window)) { fail(`No ${DEVICE} voice available.`); return; }
+    const voice = pcVoice(lang, name) || null;
+    if (lang === "ta" && !voice && !onFail) toast(inApp
       ? "No Tamil phone voice found. Install it: phone Settings → Text-to-speech → Google → Install voice data → Tamil. Or choose the Gemini AI voice."
       : "No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
-    u.rate = 1.02;
-    u.onstart = () => { if (seq === speakSeq) setState("speaking"); };
-    u.onboundary = (e) => { if (seq === speakSeq && e.name !== "sentence") window.JoViz?.wordAt(e.charIndex); };
-    u.onend = u.onerror = () => { if (seq === speakSeq) setState("idle"); };
-    speechSynthesis.speak(u);
-  }
-
-  function playPcm({ data, rate }, seq) {
-    const ctx = ensureAudio();
-    if (!ctx) throw new Error("This browser can't play audio.");
-    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-    const view = new DataView(bytes.buffer);
-    const samples = new Float32Array(Math.floor(bytes.length / 2));
-    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
-    if (!samples.length) return;
-    const buffer = ctx.createBuffer(1, samples.length, rate);
-    buffer.copyToChannel(samples, 0);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(analyser || ctx.destination);
-    src.onended = () => {
-      sources.delete(src);
-      if (seq === speakSeq && !streaming && !sources.size) setState("idle");
+    const parts = splitForSpeech(text);
+    let i = 0, offset = 0, started = false, over = false;
+    const giveUp = (msg) => {
+      if (over) return;
+      over = true; clearTimeout(watchdog);
+      try { speechSynthesis.cancel(); } catch { /* ignore */ }
+      if (seq !== speakSeq) return;
+      if (!started) fail(msg); else setState("idle");
     };
-    sources.add(src);
-    const at = Math.max(ctx.currentTime + 0.03, nextAt);
-    src.start(at);
-    nextAt = at + buffer.duration;
+    // If the voice hasn't started after a few seconds, it isn't going to.
+    const watchdog = setTimeout(() => giveUp(`The ${DEVICE} voice didn't start.`), inApp ? 4000 : 3000);
+    const next = () => {
+      if (over || seq !== speakSeq) return;
+      if (i >= parts.length) { over = true; clearTimeout(watchdog); setState("idle"); return; }
+      const piece = parts[i], at = offset;
+      const u = new SpeechSynthesisUtterance(piece);
+      u.voice = voice;
+      u.lang = voice?.lang || (lang === "ta" ? "ta-IN" : "en-IN");
+      u.rate = 1.02;
+      u.onstart = () => {
+        if (seq !== speakSeq) return;
+        if (!started) { started = true; clearTimeout(watchdog); setState("speaking"); }
+      };
+      u.onboundary = (e) => { if (seq === speakSeq && e.name !== "sentence") window.JoViz?.wordAt(at + e.charIndex); };
+      u.onend = () => { i++; offset += piece.length; next(); };
+      u.onerror = (e) => {
+        if (e.error === "interrupted" || e.error === "canceled") return; // stopped on purpose
+        giveUp(`The ${DEVICE} voice failed (${e.error || "error"}).`);
+      };
+      liveUtterance = u;
+      speechSynthesis.speak(u);
+    };
+    // Chrome can drop a speak() that comes straight after cancel(), so wait a moment.
+    setTimeout(next, 80);
   }
-
-  /**
-   * Speaks [text]. opts: lang ("en"/"ta", default from the language switch), engine, voice,
-   * quick (short alert: always the PC voice), force (speak even when replies are muted).
-   */
   async function speak(text, opts = {}) {
     if (!opts.force && !settings.speak) { setState("idle"); return; }
     stopSpeaking();
@@ -204,7 +220,8 @@
     // Fast replies: the Gemini voice takes seconds to prepare, so everyday answers use the phone/PC
     // voice, which starts at once. The morning brief (natural) and voice previews (engine) keep Gemini.
     // With no device voice for the language (often Tamil on a PC), Gemini is still used.
-    if (engine === "gemini" && settings.fastVoice && !opts.engine && !opts.natural && pcVoice(lang, lang === "ta" ? settings.pcVoiceTa : settings.pcVoiceEn)) engine = "browser";
+    let fast = false;
+    if (engine === "gemini" && settings.fastVoice && !opts.engine && !opts.natural && pcVoice(lang, lang === "ta" ? settings.pcVoiceTa : settings.pcVoiceEn)) { engine = "browser"; fast = true; }
     if (engine === "gemini" && settings.geminiKey) {
       const voice = opts.voice || (lang === "ta" ? settings.geminiVoiceTa : settings.geminiVoiceEn) || "Charon";
       try {
@@ -235,8 +252,15 @@
       }
     }
     const pcName = opts.engine === "browser" && opts.voice ? opts.voice : lang === "ta" ? settings.pcVoiceTa : settings.pcVoiceEn;
-    speakWithPc(text, lang, pcName, seq);
+    // Fast replies: if the phone/PC voice doesn't really start, the Gemini voice takes over.
+    const fallback = fast && settings.geminiKey ? (e) => {
+      if (seq !== speakSeq) return;
+      if (!warnedPcVoice) { toast(`${e.message} Using the Gemini voice.`); warnedPcVoice = true; }
+      speak(text, { ...opts, engine: "gemini" });
+    } : null;
+    speakWithPc(text, lang, pcName, seq, fallback);
   }
+  let warnedPcVoice = false;
 
   const SAMPLE = {
     en: "Good morning Karthik. Kavery had fourteen orders today, and three payments are pending.",
@@ -447,8 +471,12 @@
     $("systems").innerHTML = rows.map(([k, label]) => {
       const st = !configured[k] ? "off" : health[k] === "err" ? "err" : "ok";
       const val = { off: "OFFLINE", err: "FAULT", ok: health[k] === "ok" ? "ONLINE" : "READY" }[st];
-      return `<li class="${st}"><span class="dot"></span><span class="name">${label}</span><span class="val">${val}</span></li>`;
+      return `<li class="${st}" title="${label}: ${val.toLowerCase()}"><span class="dot"></span><span class="name">${label}</span><span class="val">${val}</span></li>`;
     }).join("");
+    const states = rows.map(([k]) => (!configured[k] ? "off" : health[k] === "err" ? "err" : "ok"));
+    const ok = states.filter((x) => x === "ok").length, faults = states.filter((x) => x === "err").length;
+    $("sys-summary").textContent = faults ? `${faults} FAULT${faults > 1 ? "S" : ""}` : `${ok}/${rows.length} ONLINE`;
+    $("sys-summary").classList.toggle("warn", faults > 0 || ok < rows.length);
   }
 
   // Last task list shown (Google Tasks or Jo's local list); reminders use it too.
@@ -744,6 +772,14 @@
   });
   document.querySelectorAll("[data-test]").forEach((b) => b.addEventListener("click", () => runTest(b.dataset.test)));
   $("refresh-agenda").addEventListener("click", renderAgenda);
+  // Systems in the dock: collapsed to dots by default; the choice is remembered on this device.
+  const setSystemsOpen = (open) => {
+    $("dock-systems").classList.toggle("collapsed", !open);
+    $("toggle-systems").setAttribute("aria-expanded", String(open));
+    try { localStorage.setItem("jo.systemsOpen", open ? "1" : ""); } catch { /* private mode */ }
+  };
+  try { if (localStorage.getItem("jo.systemsOpen")) setSystemsOpen(true); } catch { /* private mode */ }
+  ["toggle-systems", "sys-summary"].forEach((id) => $(id).addEventListener("click", () => setSystemsOpen($("dock-systems").classList.contains("collapsed"))));
   $("clear-convo").addEventListener("click", () => {
     transcript.innerHTML = "";
     agent?.reset();
