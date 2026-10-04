@@ -360,3 +360,29 @@ test("extractFigures finds amounts, percentages and counts for the HUD", () => {
   assert.deepEqual(Jo.extractFigures("Your meeting is at 5 PM on 2 October 2026."), []);
   assert.equal(Jo.extractFigures("1 order, 2 tasks, 3 emails, 4 meetings").length, 3);
 });
+
+test("web_search uses the bridge first, falls back to Gemini, and explains when both fail", async () => {
+  const bridgeWith = (reply) => ({ call: async (action, body) => { assert.equal(action, "web_search"); assert.equal(body.query, "gold rate chennai"); return reply(); } });
+  let geminiCalls = 0;
+  const gemini = { webSearch: async () => { geminiCalls++; return { text: "Gold is ₹7,100.", sources: [{ title: "goodreturns.in" }] }; } };
+  const tasks = new Jo.TaskStore(memoryStorage());
+
+  const ok = new Jo.Tools({ tasks, search: gemini, bridge: bridgeWith(() => ({
+    results: [{ title: "Gold Rate in Chennai", url: "https://www.goodreturns.in/x", snippet: "22K ₹7,100 per gram" }],
+    news: [{ title: "Gold climbs again", source: "The Hindu", date: "Sun, 04 Oct 2026" }],
+  })) });
+  const r = await ok.call("web_search", { query: "gold rate chennai" });
+  assert.match(r, /News: Gold climbs again \(The Hindu, Sun, 04 Oct 2026\)/);
+  assert.match(r, /Gold Rate in Chennai: 22K ₹7,100 per gram \(goodreturns\.in\)/);
+  assert.equal(geminiCalls, 0);
+
+  const oldBridge = new Jo.Tools({ tasks, search: gemini, bridge: bridgeWith(() => { throw new Error("Unknown action web_search"); }) });
+  assert.equal(await oldBridge.call("web_search", { query: "gold rate chennai" }), "Gold is ₹7,100.\nSources: goodreturns.in");
+
+  const failing = { webSearch: async () => { throw new Error("gemini-flash-latest: Search grounding is not supported"); } };
+  const none = new Jo.Tools({ tasks, search: failing, bridge: bridgeWith(() => { throw new Error("Unknown action web_search"); }) });
+  const msg = await none.call("web_search", { query: "gold rate chennai" });
+  assert.match(msg, /needs the latest code for web search/);
+  assert.match(msg, /Search grounding is not supported/);
+  assert.equal(failing.searchUnavailable, true);
+});

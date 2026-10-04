@@ -517,6 +517,44 @@
       this.summaries = new Map(); // today's Kavery/Thirumal summary, kept ready by prefetch()
     }
 
+    /**
+     * Searches the web: first through the Jo bridge (DuckDuckGo, Google News, Wikipedia; free, no
+     * quota), then with Gemini's Google Search. If both fail, says exactly why so it can be fixed.
+     */
+    async webSearch(query) {
+      const problems = [];
+      if (this.bridge) {
+        try {
+          const r = await this.bridge.call("web_search", { query });
+          const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+          const lines = [
+            ...(r.news || []).map((n) => `News: ${n.title} (${n.source}${n.date ? `, ${n.date}` : ""})`),
+            ...(r.results || []).map((x) => `${x.title}: ${x.snippet} (${host(x.url)})`),
+          ];
+          if (lines.length) {
+            return clip(`Web search results for "${query}". Answer from these and name the source site:\n${lines.join("\n")}`, 6000);
+          }
+          problems.push(`the bridge search found nothing${r.errors?.length ? ` (${r.errors.join("; ")})` : ""}`);
+        } catch (e) {
+          problems.push(/Unknown action/.test(e.message)
+            ? "the Jo bridge in Supabase needs the latest code for web search"
+            : `bridge search failed: ${e.message}`);
+        }
+      }
+      if (this.search && !this.search.searchUnavailable) {
+        try {
+          const { text, sources } = await this.search.webSearch(query, new Date().toDateString());
+          if (text) return sources.length ? `${text}\nSources: ${sources.map((x) => x.title).join(", ")}` : text;
+          problems.push("Google Search in Gemini found nothing");
+        } catch (e) {
+          this.search.searchUnavailable = true; // don't wait on it again until Jo is reloaded
+          problems.push(`Google Search in Gemini is unavailable on this key: ${e.message}`);
+        }
+      }
+      if (!this.bridge && !this.search) problems.push("no Gemini key or Jo bridge is set up");
+      return `Web search did not work: ${problems.join("; ")}. Tell Karthik this reason briefly.`;
+    }
+
     /** Today's summary for an app, from the copy fetched in the last few minutes when there is one. */
     async todaySummary(name, maxAgeMs = SUMMARY_MAX_AGE) {
       const key = String(name || "").toLowerCase().trim();
@@ -536,12 +574,7 @@
     async call(name, args = {}) {
       try {
         switch (name) {
-          case "web_search": {
-            if (!this.search) return "Web search needs the Gemini key in Settings.";
-            const { text, sources } = await this.search.webSearch(args.query, new Date().toDateString());
-            if (!text) return "The web search found nothing useful.";
-            return sources.length ? `${text}\nSources: ${sources.map((x) => x.title).join(", ")}` : text;
-          }
+          case "web_search": return await this.webSearch(String(args.query || ""));
           case "get_unread_mail": return await this.unreadMail(args.limit || 10);
           case "search_mail": {
             const { mails } = await this.mail().call("zoho_search", { query: args.query, limit: args.limit || 8 });
