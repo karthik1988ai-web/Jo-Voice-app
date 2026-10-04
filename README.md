@@ -135,6 +135,10 @@ Notes:
 
 Short alerts (new-mail and reminder announcements) always use the PC voice, so they don't use up the Gemini voice limit.
 
+**Fast replies (on by default):** the Gemini voice needs a few seconds to prepare each answer, so everyday replies are spoken at once in the phone/PC voice and the Gemini voice is kept for the morning brief. If there's no phone/PC voice for the language (often Tamil on a PC), Jo still uses the Gemini voice. Untick **Fast replies** to use the Gemini voice for everything.
+
+**Speed:** under each reply Jo shows where the time went: *think* (Gemini), *data* (mail, Kavery, Thirumal, web lookups) and *voice* (until speech starts). Everyday questions use the quicker Gemini Flash-Lite model; web search and the morning brief use the main model. Today's Kavery and Thirumal summaries are refreshed in the background every 5 minutes, so those questions answer without waiting for the bridge.
+
 ## Talk to Jo: say "Jo"
 
 Jo listens for its name while it's idle (the ear button at the top glows while it listens). Say **"Jo"** and wait for the chime, then speak; or say it all at once: **"Jo, check my mail"**. "Hey Jo" works too, and in Tamil mode say **"ஜோ"**.
