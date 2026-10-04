@@ -6,7 +6,7 @@ Jo is a "Jarvis"-style assistant with a holographic HUD. Talk to it (or type) in
 - **"How many Kavery orders today? Any pending deliveries?"**: reads the **Kavery Delivery** Supabase database
 - **"What are today's Thirumal sales? Who owes us money?"**: reads the **Thirumal accounts** Supabase database
 - **"What's on my calendar this week?"**: your **Google Calendar**
-- **"What's the weather in Chennai?"**, **"Today's news"**, **"Search the gold rate today"**: searches the **web** live (Gemini's Google Search; if your model has no free search, Jo uses Gemini 2.5 Flash, whose free tier includes 500 searches a day)
+- **"What's the weather in Chennai?"**, **"Today's news"**, **"Search the gold rate today"**: searches the **web** live through the Jo bridge (DuckDuckGo, Google News and Wikipedia; free, no key). If the bridge can't, Jo tries Gemini's own Google Search.
 - **"Remind me to call the supplier at 5 PM"**, **"Add a meeting with the Britannia rep tomorrow at 11"**: Jo's own **tasks and agenda**, with reminders
 
 Every morning (8:00 AM by default) Jo writes a **morning brief** covering calendar, tasks, Kavery, Thirumal and important mail.

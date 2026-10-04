@@ -72,6 +72,25 @@ function setup() {
     }
     if (url === "https://mail.zoho.com/api/accounts/77/folders/2/messages/1/content") return j({ data: { content: "<p>Hi</p>" } });
     if (url === "https://cal.example/basic.ics") return new Response(ICS);
+    if (url === "https://html.duckduckgo.com/html/") {
+      const q = new URLSearchParams(String(init!.body)).get("q");
+      if (q === "nothing at all") return new Response("<html>No results.</html>");
+      return new Response(`
+        <div class="result results_links"><a rel="nofollow" class="result__a" href="https://duckduckgo.com/y.js?ad_domain=x">Ad: cheap gold</a>
+          <a class="result__snippet" href="x">Buy now</a></div>
+        <div class="result"><h2><a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.goodreturns.in%2Fgold-rates%2Fchennai.html&amp;rut=1">Gold Rate in <b>Chennai</b> Today</a></h2>
+          <a class="result__snippet" href="x">22 carat gold is &#8377;7,100 per gram in Chennai today &amp; 24 carat ₹7,745.</a></div>
+        <div class="result"><h2><a rel="nofollow" href="https://example.com/b" class="result__a">Second &quot;result&quot;</a></h2>
+          <a class="result__snippet" href="x">More text</a></div>`);
+    }
+    if (url.startsWith("https://news.google.com/rss")) {
+      assert(url.includes("q=tamil%20nadu") || url === "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en", url);
+      return new Response(`<rss><channel><item><title><![CDATA[Heavy rain in Chennai - The Hindu]]></title><link>https://n/1</link>
+        <pubDate>Sun, 04 Oct 2026 06:00:00 GMT</pubDate><source url="https://thehindu.com">The Hindu</source></item></channel></rss>`);
+    }
+    if (url.startsWith("https://en.wikipedia.org/w/api.php")) {
+      return j({ query: { search: [{ title: "Nothing at all", snippet: "a <span class=\"searchmatch\">song</span>" }] } });
+    }
     if (url === "https://oauth2.googleapis.com/token") {
       const f = init!.body as URLSearchParams;
       assertEquals(f.get("client_secret"), "gsecret");
@@ -198,4 +217,22 @@ Deno.test("calendar expands recurring and all-day events", async () => {
   assertEquals(body.events[1].start, Date.UTC(2026, 9, 2, 12, 30)); // Friday 2 Oct
   assertEquals(body.events[2].allDay, true);
   assertEquals(body.events[2].date, "2026-10-05");
+});
+
+Deno.test("web search: DuckDuckGo results without ads, news headlines, Wikipedia backup", async () => {
+  const { call } = setup();
+  const r = await call({ action: "web_search", query: "gold rate chennai today" });
+  assertEquals(r.status, 200);
+  assertEquals(r.body.results, [
+    { title: "Gold Rate in Chennai Today", url: "https://www.goodreturns.in/gold-rates/chennai.html", snippet: "22 carat gold is ₹7,100 per gram in Chennai today & 24 carat ₹7,745." },
+    { title: 'Second "result"', url: "https://example.com/b", snippet: "More text" },
+  ]);
+  assertEquals(r.body.news, []);
+  const news = await call({ action: "web_search", query: "What are today's top news headlines in Tamil Nadu?" });
+  assertEquals(news.body.news, [{ title: "Heavy rain in Chennai", source: "The Hindu", date: "Sun, 04 Oct 2026 06:00:00 GMT" }]);
+  const top = await call({ action: "web_search", query: "today's news" });
+  assertEquals(top.body.news.length, 1);
+  const wiki = await call({ action: "web_search", query: "nothing at all" });
+  assertEquals(wiki.body.results[0].snippet, "a song");
+  assertEquals((await call({ action: "web_search", query: "  " })).status, 400);
 });

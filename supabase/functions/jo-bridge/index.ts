@@ -1,5 +1,5 @@
 // Jo bridge: lets the Jo web app reach services that browsers can't call directly
-// (Zoho Mail, Google Calendar's private iCal link). Read-only.
+// (Zoho Mail, Google Calendar's private iCal link, web search). Read-only.
 //
 // Deploy in the Supabase dashboard: Edge Functions → Deploy a new function → Via editor,
 // name it "jo-bridge", paste this file, and turn OFF "Verify JWT" (Jo uses its own key).
@@ -264,8 +264,93 @@ export function createHandler(env: Env = (n) => Deno.env.get(n), http: typeof fe
   }
 
   // deno-lint-ignore no-explicit-any
+  // ---- web search, no API key needed: DuckDuckGo results, Google News for news, Wikipedia as a backup ----
+  const BROWSER = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    "Accept-Language": "en-IN,en;q=0.9",
+  };
+  type Hit = { title: string; url: string; snippet: string };
+  const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&quot;/g, '"')
+    .replace(/&#x27;|&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/\s+/g, " ").trim();
+  // DuckDuckGo links go through a redirect (…/l/?uddg=<real url>); keep the real address.
+  const realUrl = (href: string) => {
+    const m = /[?&]uddg=([^&]+)/.exec(href.replace(/&amp;/g, "&"));
+    return m ? decodeURIComponent(m[1]) : href.startsWith("//") ? `https:${href}` : href;
+  };
+  const isAd = (url: string) => /duckduckgo\.com\/y\.js|[?&]ad_provider=/.test(url);
+
+  async function duckDuckGo(q: string): Promise<Hit[]> {
+    const res = await http("https://html.duckduckgo.com/html/", {
+      method: "POST",
+      headers: { ...BROWSER, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ q, kl: "in-en" }),
+    });
+    if (!res.ok) throw new Error(`DuckDuckGo ${res.status}`);
+    const html = await res.text();
+    const hits: Hit[] = [];
+    const link = /<a\b([^>]*class="result__a"[^>]*)>([\s\S]*?)<\/a>/g;
+    let m: RegExpExecArray | null;
+    while ((m = link.exec(html)) && hits.length < 8) {
+      const href = /href="([^"]+)"/.exec(m[1])?.[1] ?? "";
+      const rest = html.slice(link.lastIndex, link.lastIndex + 4000);
+      const end = rest.indexOf('class="result__a"');
+      const snippet = /class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div|td)>/.exec(end > 0 ? rest.slice(0, end) : rest)?.[1] ?? "";
+      const url = realUrl(href);
+      if (url && !isAd(url)) hits.push({ title: text(m[2]), url, snippet: text(snippet) });
+    }
+    return hits;
+  }
+
+  // Google News RSS: headlines with their source and time. A plain "today's news" gets the top stories.
+  async function googleNews(q: string): Promise<{ title: string; source: string; date: string }[]> {
+    const keywords = q.toLowerCase().replace(/['’]s\b/g, "")
+      .replace(/\b(what|whats|what's|are|is|the|top|today|today's|todays|latest|news|headlines?|breaking|in|and|of|for|me|tell|give|show|any|about|on)\b/g, " ")
+      .replace(/[^\p{L}\p{N} ]/gu, " ").replace(/\s+/g, " ").trim();
+    const feed = keywords
+      ? `https://news.google.com/rss/search?q=${encodeURIComponent(keywords)}&hl=en-IN&gl=IN&ceid=IN:en`
+      : "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en";
+    const res = await http(feed, { headers: BROWSER });
+    if (!res.ok) throw new Error(`Google News ${res.status}`);
+    const xml = await res.text();
+    const tag = (item: string, name: string) => {
+      const v = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`).exec(item)?.[1] ?? "";
+      return text(v.replace(/^<!\[CDATA\[|\]\]>$/g, ""));
+    };
+    return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].slice(0, 8).map(([, item]) => {
+      const source = tag(item, "source");
+      return { title: tag(item, "title").replace(new RegExp(` - ${source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), ""), source, date: tag(item, "pubDate") };
+    });
+  }
+
+  async function wikipedia(q: string): Promise<Hit[]> {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&utf8=1&srlimit=3&srsearch=${encodeURIComponent(q)}`;
+    const res = await http(url, { headers: { ...BROWSER, "User-Agent": "JoAssistant/1.0 (personal assistant)" } });
+    if (!res.ok) throw new Error(`Wikipedia ${res.status}`);
+    const data = await res.json();
+    return (data.query?.search ?? []).map((r: { title: string; snippet: string }) => ({
+      title: r.title, url: `https://en.wikipedia.org/wiki/${encodeURIComponent(r.title.replace(/ /g, "_"))}`, snippet: text(r.snippet),
+    }));
+  }
+
+  async function webSearch(query: string) {
+    const q = query.trim().slice(0, 300);
+    if (!q) throw new Error("Nothing to search for.");
+    const errors: string[] = [];
+    const wantsNews = /\b(news|headlines?|breaking)\b|செய்தி/i.test(q);
+    const [results, news] = await Promise.all([
+      duckDuckGo(q).catch((e) => { errors.push(e.message); return [] as Hit[]; }),
+      wantsNews ? googleNews(q).catch((e) => { errors.push(e.message); return []; }) : Promise.resolve([]),
+    ]);
+    let hits = results;
+    if (!hits.length && !news.length) hits = await wikipedia(q).catch((e) => { errors.push(e.message); return []; });
+    return { query: q, results: hits.slice(0, 6), news: news.slice(0, 6), errors };
+  }
+
   async function run(action: string, body: any) {
     switch (action) {
+      case "web_search":
+        return await webSearch(String(body.query ?? ""));
       case "ping":
         return { ok: true };
       case "zoho_connect": {
