@@ -149,11 +149,13 @@
     const re = lang === "ta" ? /^ta/i : /^en/i;
     const chosen = name && voices.find((v) => v.name === name);
     if (chosen) return chosen;
-    // Voices installed on the device first: online ones can fail silently.
-    const local = (v) => v.localService !== false && !/network|online/i.test(v.name);
-    const pick = (r) => voices.find((v) => r.test(v.lang) && local(v)) || voices.find((v) => r.test(v.lang));
+    // Best first: Microsoft's natural voices (Edge), then voices installed on the device, then the
+    // rest (other online voices can fail silently).
+    const pick = (r) => voices.filter((v) => r.test(v.lang)).sort((a, b) => voiceRank(a) - voiceRank(b))[0];
     return lang === "ta" ? pick(re) : pick(/^en-IN/i) || pick(/^en-GB/i) || pick(re);
   }
+  const isNatural = (v) => /natural|neural/i.test(v.name);
+  const voiceRank = (v) => (isNatural(v) ? 0 : v.localService !== false && !/network|online/i.test(v.name) ? 1 : 2);
   // Short pieces: long text in one go can stop partway in Chrome and on some phones.
   function splitForSpeech(text) {
     const parts = String(text).match(/[^.!?।\n]+[.!?।]*[\s\n]*/g) || [String(text)];
@@ -175,7 +177,7 @@
     const voice = pcVoice(lang, name) || null;
     if (lang === "ta" && !voice && !onFail) toast(inApp
       ? "No Tamil phone voice found. Install it: phone Settings → Text-to-speech → Google → Install voice data → Tamil. Or choose the Gemini AI voice."
-      : "No Tamil PC voice found. Microsoft Edge has one built in, or choose the Gemini AI voice.");
+      : "No Tamil PC voice found. Open Jo in Microsoft Edge for free Tamil voices (Pallavi, Valluvar), or choose the Gemini AI voice.");
     const parts = splitForSpeech(text);
     let i = 0, offset = 0, started = false, over = false;
     const giveUp = (msg) => {
@@ -278,8 +280,9 @@
         sel.innerHTML = GEMINI_VOICES.map(([n, d]) => `<option value="${n}">${n} · ${esc(d)}</option>`).join("");
       } else {
         const re = lang === "ta" ? /^ta/i : /^en/i;
-        const list = voices.filter((v) => re.test(v.lang));
-        sel.innerHTML = '<option value="">Automatic</option>' + list.map((v) => `<option value="${esc(v.name)}">${esc(v.name)} (${esc(v.lang)})</option>`).join("")
+        const list = voices.filter((v) => re.test(v.lang)).sort((a, b) => voiceRank(a) - voiceRank(b));
+        sel.innerHTML = '<option value="">Automatic (clearest available)</option>' + list.map((v) =>
+          `<option value="${esc(v.name)}">${isNatural(v) ? "★ " : ""}${esc(v.name.replace(/^Microsoft /, "").replace(/ Online \(Natural\)/, " · natural"))} (${esc(v.lang)})</option>`).join("")
           + (list.length ? "" : `<option value="" disabled>No ${lang === "ta" ? "Tamil" : "English"} voice on this ${DEVICE}</option>`);
       }
       sel.value = current || (engine === "gemini" ? (lang === "ta" ? "Kore" : "Charon") : "");
@@ -289,7 +292,9 @@
       ? `Gemini voices sound natural and speak both English and Tamil. They need internet and use Gemini's free daily voice limit; if it runs out, Jo uses the ${DEVICE} voice.`
       : inApp
         ? "Phone voices are instant and work offline. For Tamil, install it once: phone Settings → Text-to-speech → Google → Install voice data → Tamil."
-        : "PC voices are instant and work offline. For Tamil, Microsoft Edge includes good voices (Pallavi, Valluvar).";
+        : voices.some(isNatural)
+          ? "★ marks Microsoft's natural voices: clear and free, they need internet. Tamil: Pallavi, Valluvar (India); English: Neerja, Prabhat (India)."
+          : "For much clearer voices, open Jo in Microsoft Edge: it adds free natural voices, including Tamil (Pallavi, Valluvar) and Indian English (Neerja, Prabhat). Chrome only has the basic Windows voices.";
   }
 
   // ---------- speech in ----------
