@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600&family=Noto+Sans+Tamil:wght@400;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=18">
+<link rel="stylesheet" href="style.css?v=20">
 </head>
 <body>
 <canvas id="particles" aria-hidden="true"></canvas>
@@ -155,6 +155,7 @@
       </label>
       <div class="voice-row"><label>English voice<select id="voice-en"></select></label><button class="test" data-preview="en">▶ Preview</button></div>
       <div class="voice-row"><label>Tamil voice<select id="voice-ta"></select></label><button class="test" data-preview="ta">▶ Preview</button></div>
+      <label class="row"><input type="checkbox" data-setting="fastVoice"> Fast replies: answer at once in the phone/PC voice (the Gemini voice takes a few seconds; it's kept for the morning brief)</label>
       <p class="hint" id="voice-hint"></p>
       <details class="direct"><summary>Gemini voice model (advanced)</summary>
         <label>Model<input data-setting="ttsModel" placeholder="gemini-2.5-flash-preview-tts" spellcheck="false"></label>
@@ -228,9 +229,9 @@
 
 <div class="toast" id="toast" hidden></div>
 
-<script src="jo-android.js?v=18"></script>
-<script src="jo-graph.js?v=18"></script>
-<script src="jo-core.js?v=18"></script>
-<script src="jo-ui.js?v=18"></script>
+<script src="jo-android.js?v=20"></script>
+<script src="jo-graph.js?v=20"></script>
+<script src="jo-core.js?v=20"></script>
+<script src="jo-ui.js?v=20"></script>
 </body>
 </html>

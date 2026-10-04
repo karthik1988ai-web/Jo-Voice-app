@@ -8,7 +8,8 @@
   const DEFAULT_MODEL = "gemini-flash-latest";
   // Used when the main model is overloaded (503) or its free quota is used up (429).
   const FALLBACK_MODEL = "gemini-flash-lite-latest";
-  const RETRY_DELAYS = [1500, 4000];
+  // When Google is busy: one quick retry, then the next model (waiting longer rarely helps).
+  const RETRY_DELAYS = [600];
   // Gemini 3 models think before answering; "low" keeps replies quick.
   const THINKING_LEVEL = "low";
   // Models whose free tier includes Google Search (tried when the main model has none).
@@ -91,11 +92,14 @@
      * Returns the model's content object; append it to history unchanged (keeps thought signatures).
      * Busy errors (5xx, network) are retried, then the lighter fallback model is tried.
      */
-    async generate(system, contents, functions = [], toolConfig = null) {
+    async generate(system, contents, functions = [], toolConfig = null, { fast = false } = {}) {
       const body = { systemInstruction: { parts: [{ text: system }] }, contents };
       if (functions.length) body.tools = [{ functionDeclarations: functions }];
       if (toolConfig) body.toolConfig = toolConfig;
-      return Gemini.parse(await this.request(body));
+      // fast: everyday questions go to the quicker Flash-Lite model first, unless a model of
+      // its own was chosen in Settings.
+      const models = fast && this.model === DEFAULT_MODEL ? [FALLBACK_MODEL, DEFAULT_MODEL] : undefined;
+      return Gemini.parse(await this.request(body, { models }));
     }
 
     /**
@@ -126,8 +130,8 @@
      * that don't support it are remembered and asked without. nextOnReject: any refusal from a
      * model (e.g. a feature it doesn't offer) moves on to the next model instead of failing.
      */
-    async request(body, { models = [this.model, DEFAULT_MODEL, FALLBACK_MODEL], nextOnReject = false } = {}) {
-      models = [...new Set(models)];
+    async request(body, { models, nextOnReject = false } = {}) {
+      models = [...new Set(models || [this.model, DEFAULT_MODEL, FALLBACK_MODEL])];
       let lastError;
       for (const model of models) {
         for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
@@ -505,8 +509,28 @@
     }, ["title", "start"]),
   ];
 
+  const SUMMARY_MAX_AGE = 6 * 60000; // prefetch() refreshes every 5 minutes
+
   class Tools {
-    constructor({ bridge = null, kavery = null, thirumal = null, tasks, google = null, search = null }) { Object.assign(this, { bridge, kavery, thirumal, tasks, google, search }); }
+    constructor({ bridge = null, kavery = null, thirumal = null, tasks, google = null, search = null }) {
+      Object.assign(this, { bridge, kavery, thirumal, tasks, google, search });
+      this.summaries = new Map(); // today's Kavery/Thirumal summary, kept ready by prefetch()
+    }
+
+    /** Today's summary for an app, from the copy fetched in the last few minutes when there is one. */
+    async todaySummary(name, maxAgeMs = SUMMARY_MAX_AGE) {
+      const key = String(name || "").toLowerCase().trim();
+      const hit = this.summaries.get(key);
+      if (hit && Date.now() - hit.at < maxAgeMs) return `${hit.text}\n(as of ${formatClock(hit.at)})`;
+      const text = await this.app(key).summary(null);
+      this.summaries.set(key, { text, at: Date.now() });
+      return text;
+    }
+
+    /** Fetches today's summaries in the background so "how is Kavery doing?" answers at once. */
+    async prefetch() {
+      await Promise.all(["kavery", "thirumal"].filter((k) => this[k]).map((k) => this.todaySummary(k, 0).catch(() => {})));
+    }
     get functions() { return FUNCTIONS; }
 
     async call(name, args = {}) {
@@ -527,7 +551,10 @@
             const { content } = await this.mail().call("zoho_read", { folderId: args.folder_id, messageId: args.message_id });
             return clip(stripHtml(content), 5000);
           }
-          case "get_app_summary": return await this.app(args.app).summary(args.date || null);
+          case "get_app_summary": {
+            const today = !args.date || args.date === isoDate();
+            return today ? await this.todaySummary(args.app) : await this.app(args.app).summary(args.date);
+          }
           case "search_app_records": return await this.app(args.app).lookup(args.search, args.from, args.to);
           case "describe_app_tables": return await this.app(args.app).describe();
           case "query_app_data": return await this.app(args.app).query(args.table, args.select, args.filters, args.order, args.limit || 20);
@@ -623,7 +650,8 @@
   }
 
   // ---------- agent ----------
-  const MAX_STEPS = 6, MAX_HISTORY = 30;
+  // A shorter history means less to send to Gemini each time, so quicker answers.
+  const MAX_STEPS = 6, MAX_HISTORY = 12;
 
   // ...but "search my mail for …" or "look up Kavery orders" are his own data, not the web.
   const OWN_DATA_WORDS = /\b(mails?|e-?mails?|inbox|zoho|kavery|thirumal|tasks?|calendar|agenda|orders?|invoices?|customers?|payments?|salesm[ae]n)\b|மெயில்|ஆர்டர்/i;
@@ -669,18 +697,23 @@
       this.contents.push(Gemini.userText(`[Now: ${this.now()}]\n${text}`));
       // "search …", "google …", "look up …": go straight to the web search.
       const forceSearch = WEB_WORDS.test(text) && !OWN_DATA_WORDS.test(text) && this.tools.functions.some((f) => f.name === "web_search");
+      const stats = this.lastStats = { think: 0, data: 0 }; // seconds spent in Gemini and in lookups
       for (let step = 0; step < MAX_STEPS; step++) {
         const toolConfig = step === 0 && forceSearch ? { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["web_search"] } } : null;
-        const reply = await this.gemini.generate(this.systemPrompt(), this.contents, this.tools.functions, toolConfig);
+        let t = Date.now();
+        const reply = await this.gemini.generate(this.systemPrompt(), this.contents, this.tools.functions, toolConfig, { fast: true });
+        stats.think += (Date.now() - t) / 1000;
         this.contents.push(reply);
         const calls = Gemini.calls(reply);
         if (!calls.length) return Gemini.text(reply) || (this.tamil ? "மன்னிக்கவும், பதில் இல்லை." : "Sorry, I have no answer for that.");
         // Several lookups in one step run at the same time.
+        t = Date.now();
         const parts = await Promise.all(calls.map(async (call) => {
           onTool(call.name);
           const result = await this.tools.call(call.name, call.args || {});
           return { functionResponse: { name: call.name, response: { result } } };
         }));
+        stats.data += (Date.now() - t) / 1000;
         this.contents.push({ role: "user", parts });
       }
       return this.tamil ? "இது கொஞ்சம் சிக்கலாக உள்ளது. மீண்டும் எளிமையாகக் கேளுங்கள்." : "That took too many steps. Please ask in a simpler way.";

@@ -26,7 +26,7 @@
     thirumal: { viaBridge: true, url: "", key: "", tables: "", fn: "", lookupFn: "" },
     tamil: false, speak: true,
     googleConnected: false, googleTasks: true,
-    voiceEngine: "gemini", geminiVoiceEn: "Charon", geminiVoiceTa: "Kore", pcVoiceEn: "", pcVoiceTa: "", ttsModel: "",
+    voiceEngine: "gemini", fastVoice: true, geminiVoiceEn: "Charon", geminiVoiceTa: "Kore", pcVoiceEn: "", pcVoiceTa: "", ttsModel: "",
     wakeWord: true, briefEnabled: true, briefTime: "08:00", mailCheckMinutes: 3, announceMail: true,
   };
   let settings = { ...DEFAULTS, ...readJson("jo.settings", {}) };
@@ -73,7 +73,13 @@
     list_tasks: "CHECKING TASKS", add_task: "ADDING TASK", complete_task: "UPDATING TASK", delete_task: "UPDATING TASK",
     list_events: "CHECKING AGENDA", add_event: "ADDING TO AGENDA", web_search: "SEARCHING THE WEB",
   };
+  // Measures how long the voice takes to start after a reply appears (shown under the reply).
+  let voiceTimer = null;
   function setState(mode, label) {
+    if (voiceTimer && mode !== "thinking") {
+      if (mode === "speaking" && voiceTimer.el) voiceTimer.el.textContent += ` · voice ${((performance.now() - voiceTimer.t) / 1000).toFixed(1)} s`;
+      voiceTimer = null;
+    }
     window.JoGraph?.setActivity(mode);
     reactor.className = `reactor ${mode}`;
     stateEl.className = `state ${mode}`;
@@ -116,7 +122,8 @@
     div.className = `msg ${who}${opts.error ? " err" : ""}`;
     const meta = [
       opts.tools?.length ? `checked: ${[...new Set(opts.tools)].map((t) => t.replace(/_/g, " ")).join(", ")}` : "",
-      opts.secs ? `${opts.secs.toFixed(1)} s` : "",
+      opts.stats ? `think ${opts.stats.think.toFixed(1)} s` : "",
+      opts.stats?.data ? `data ${opts.stats.data.toFixed(1)} s` : "",
     ].filter(Boolean).join(" · ");
     div.innerHTML = `<div><div class="who">${who === "me" ? "YOU" : "JO"}</div><div class="bubble${settings.tamil ? " ta" : ""}">${esc(text)}</div>${
       meta ? `<div class="tools">${esc(meta)}</div>` : ""}</div>`;
@@ -208,7 +215,11 @@
     stopSpeaking();
     const seq = speakSeq;
     const lang = opts.lang || (settings.tamil ? "ta" : "en");
-    const engine = opts.quick ? "browser" : opts.engine || settings.voiceEngine;
+    let engine = opts.quick ? "browser" : opts.engine || settings.voiceEngine;
+    // Fast replies: the Gemini voice takes seconds to prepare, so everyday answers use the phone/PC
+    // voice, which starts at once. The morning brief (natural) and voice previews (engine) keep Gemini.
+    // With no device voice for the language (often Tamil on a PC), Gemini is still used.
+    if (engine === "gemini" && settings.fastVoice && !opts.engine && !opts.natural && pcVoice(lang, lang === "ta" ? settings.pcVoiceTa : settings.pcVoiceEn)) engine = "browser";
     if (engine === "gemini" && settings.geminiKey) {
       const voice = opts.voice || (lang === "ta" ? settings.geminiVoiceTa : settings.geminiVoiceEn) || "Charon";
       try {
@@ -332,7 +343,7 @@
         if (e.results[i].isFinal) return fire(m.command);
         // Heard "Jo" mid-sentence: wait a moment for the rest, then go anyway.
         clearTimeout(waitTimer);
-        waitTimer = setTimeout(() => fire(m.command), m.command ? 1500 : 900);
+        waitTimer = setTimeout(() => fire(m.command), m.command ? 800 : 600);
       }
     };
     r.onerror = (e) => {
@@ -402,7 +413,8 @@
     const used = [], t0 = performance.now();
     try {
       const reply = await a.ask(text, (tool) => { used.push(tool); setState("thinking", TOOL_LABELS[tool] || "PROCESSING…"); });
-      addMsg("jo", reply, { tools: used, secs: (performance.now() - t0) / 1000 });
+      addMsg("jo", reply, { tools: used, stats: a.lastStats || { think: (performance.now() - t0) / 1000, data: 0 } });
+      voiceTimer = { t: performance.now(), el: transcript.lastElementChild?.querySelector(".tools") };
       renderTasks(); renderAgenda();
       speak(reply);
     } catch (e) {
@@ -421,7 +433,7 @@
       const text = await a.morningBrief();
       storage.setItem("jo.brief", JSON.stringify({ date: isoDate(), text, played: false }));
       addMsg("jo", text);
-      if (!auto || navigator.userActivation?.hasBeenActive) { speak(text); markBriefPlayed(); }
+      if (!auto || navigator.userActivation?.hasBeenActive) { speak(text, { natural: true }); markBriefPlayed(); }
       else { $("brief-banner").hidden = false; setState("idle"); notify("Your morning brief is ready", "Click to listen", () => { window.focus(); playBrief(); }); }
     } catch (e) {
       addMsg("jo", `Morning brief failed: ${e.message}`, { error: true });
@@ -429,7 +441,7 @@
     } finally { busy = false; }
   }
   const markBriefPlayed = () => { const b = readJson("jo.brief", null); if (b) { b.played = true; storage.setItem("jo.brief", JSON.stringify(b)); } $("brief-banner").hidden = true; };
-  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) speak(b.text, { force: true }); markBriefPlayed(); }
+  function playBrief() { const b = readJson("jo.brief", null); if (b?.text) speak(b.text, { force: true, natural: true }); markBriefPlayed(); }
 
   // ---------- panels ----------
   function renderSystems() {
@@ -832,6 +844,10 @@
   setInterval(checkBrief, 60000);
   setInterval(renderAgenda, 10 * 60000);
   setInterval(renderTasks, 5 * 60000); // picks up tasks added in Google Tasks elsewhere
+  // Keep today's Kavery and Thirumal numbers ready, so those questions skip the slow lookup.
+  const prefetch = () => { if (!busy) getAgent()?.tools.prefetch(); };
+  setTimeout(prefetch, 4000);
+  setInterval(prefetch, 5 * 60000);
   checkReminders(); checkBrief();
   checkMail(); scheduleMail();
   // The Android app asks for this when Jo is opened by the assistant gesture or "Talk to Jo".

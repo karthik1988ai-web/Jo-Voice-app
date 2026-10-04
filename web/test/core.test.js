@@ -16,7 +16,8 @@ test("Gemini tool loop echoes thought signatures and runs add_task", async () =>
   const tasks = new Jo.TaskStore(memoryStorage());
   const agent = new Jo.Agent(new Jo.Gemini("KEY", "gemini-flash-latest", http), new Jo.Tools({ tasks }));
   assert.equal(await agent.ask("remind me to call supplier tomorrow 5pm"), "Added, I'll remind you at 5 PM.");
-  assert.equal(sent[0].url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent");
+  // Everyday chat goes to the quicker Flash-Lite model first.
+  assert.equal(sent[0].url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent");
   assert.equal(sent[0].init.headers["x-goog-api-key"], "KEY");
   assert.ok(sent[0].body.tools[0].functionDeclarations.length >= 12);
   const c = sent[1].body.contents;
@@ -48,7 +49,7 @@ test("Gemini speech asks for audio with the chosen voice and reads the sample ra
 
 test("Gemini retries 503, then falls back to the lite model", async () => {
   const urls = [];
-  const statuses = [503, 503, 503, 200];
+  const statuses = [503, 503, 200];
   const http = async (url) => {
     urls.push(url);
     const status = statuses.shift();
@@ -61,8 +62,8 @@ test("Gemini retries 503, then falls back to the lite model", async () => {
   g.sleep = async (ms) => { waits.push(ms); };
   const reply = await g.generate("s", [Jo.Gemini.userText("hi")]);
   assert.equal(Jo.Gemini.text(reply), "Hello Karthik");
-  assert.deepEqual(waits, [1500, 4000]);
-  assert.equal(urls.filter((u) => u.includes("/gemini-flash-latest:")).length, 3);
+  assert.deepEqual(waits, [600]); // one quick retry, then the next model
+  assert.equal(urls.filter((u) => u.includes("/gemini-flash-latest:")).length, 2);
   assert.match(urls.at(-1), /\/gemini-flash-lite-latest:generateContent$/);
 });
 
@@ -321,4 +322,28 @@ test("Gemini speech can stream audio pieces as they arrive", async () => {
   await new Jo.Gemini("k", "m", http).speech("hello", "Kore", undefined, "", (c) => chunks.push(c));
   assert.match(url, /:streamGenerateContent\?alt=sse$/);
   assert.deepEqual(chunks, [{ data: "AAAA", rate: 24000 }, { data: "BBBB", rate: 24000 }]);
+});
+
+test("today's app summary is served from the prefetched copy; other dates go to the app", async () => {
+  let calls = 0;
+  const kavery = { summary: async (date) => { calls++; return date ? `summary for ${date}` : `orders: ${calls}`; } };
+  const tools = new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()), kavery });
+  await tools.prefetch();
+  assert.equal(calls, 1);
+  assert.match(await tools.call("get_app_summary", { app: "kavery" }), /^orders: 1\n\(as of /);
+  assert.match(await tools.call("get_app_summary", { app: "Kavery", date: Jo.isoDate() }), /^orders: 1/);
+  assert.equal(calls, 1); // no new lookup
+  assert.equal(await tools.call("get_app_summary", { app: "kavery", date: "2026-09-01" }), "summary for 2026-09-01");
+  assert.match(await tools.call("get_app_summary", { app: "thirumal" }), /not connected/);
+});
+
+test("Agent records how long Gemini and the lookups took", async () => {
+  const replies = [
+    { candidates: [{ content: { parts: [{ functionCall: { name: "list_tasks", args: {} } }] } }] },
+    { candidates: [{ content: { parts: [{ text: "No open tasks." }] } }] },
+  ];
+  const agent = new Jo.Agent(new Jo.Gemini("k", "m", async () => json(replies.shift())), new Jo.Tools({ tasks: new Jo.TaskStore(memoryStorage()) }));
+  await agent.ask("tasks?");
+  assert.equal(typeof agent.lastStats.think, "number");
+  assert.equal(typeof agent.lastStats.data, "number");
 });
