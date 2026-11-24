@@ -14,8 +14,6 @@ Every morning (8:00 AM by default) Jo writes a **morning brief** covering calend
 There are two versions:
 
 1. **PC version (web, in `web/`)**: start here. It runs in Chrome or Microsoft Edge.
-> **Since Nov 2026:** `web/index.html` is the single-file **Jo Office** from the [Jo-Office](https://github.com/karthik1988ai-web/Jo-Office) repository (Zoho mail, CRM, meetings, memory). It is published here so the web address and the phone app stay the same. Update it by copying Jo-Office's `index.html` over `web/index.html`. The other files in `web/` belong to the older Jo and are no longer loaded.
-
 2. **Android app (in `phone/`)**: the same Jo in an APK, built by GitHub Actions. It opens the live web version, so every update to the website reaches the phone without reinstalling. (`app/` holds the first, native Android version, which is no longer built.)
 
 Jo's brain is **Google Gemini** on the free tier. Jo is **read-only** for mail and both business databases. It only adds or completes its own tasks and agenda items.
