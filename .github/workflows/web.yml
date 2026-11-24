@@ -43,5 +43,9 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
+      # GitHub sometimes lists a just-uploaded artifact only a few seconds later; without this
+      # wait the deploy step fails with "No artifacts named github-pages were found".
+      - name: Wait for the upload to register
+        run: sleep 20
       - id: deployment
         uses: actions/deploy-pages@v4
